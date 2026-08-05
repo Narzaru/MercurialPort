@@ -1,6 +1,10 @@
-# GitHub Actions Workflow created for handling the release process based on the draft release prepared with the Build workflow.
-# Running the publishPlugin task requires all the following secrets to be provided: PUBLISH_TOKEN, PRIVATE_KEY, PRIVATE_KEY_PASSWORD, CERTIFICATE_CHAIN.
-# See https://plugins.jetbrains.com/docs/intellij/plugin-signing.html for more information.
+# Прикрепляет собранный плагин к опубликованному GitHub-релизу.
+#
+# Публикации в JetBrains Marketplace здесь нет: плагин распространяется только через
+# GitHub Releases, а publishPlugin требовал секретов (PUBLISH_TOKEN, PRIVATE_KEY,
+# PRIVATE_KEY_PASSWORD, CERTIFICATE_CHAIN) и падал раньше, чем zip успевал прикрепиться.
+#
+# Релизы делаются только с main — иначе в релиз может уехать код, не прошедший проверки.
 
 name: Release
 on:
@@ -9,13 +13,11 @@ on:
 
 jobs:
 
-  # Prepare and publish the plugin to JetBrains Marketplace repository
   release:
-    name: Publish Plugin
+    name: Attach Plugin Distribution
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
     steps:
 
       # Free GitHub Actions Environment Disk Space
@@ -25,11 +27,21 @@ jobs:
           tool-cache: false
           large-packages: false
 
-      # Check out the current repository
+      # Check out the released revision along with main, чтобы проверить принадлежность ветке
       - name: Fetch Sources
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+
+      # Релиз только с main: тег должен быть предком (или самим) HEAD ветки main
+      - name: Verify the tag is on main
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::Тег ${{ github.event.release.tag_name }} не входит в main — релиз отменён."
+            exit 1
+          fi
 
       # Set up the Java environment for the next steps
       - name: Setup Java
@@ -44,57 +56,11 @@ jobs:
         with:
           cache-read-only: true
 
-      # Update the Unreleased section with the current release note
-      - name: Patch Changelog
-        if: ${{ github.event.release.body != '' }}
-        env:
-          CHANGELOG: ${{ github.event.release.body }}
-        run: |
-          RELEASE_NOTE="./build/tmp/release_note.txt"
-          mkdir -p "$(dirname "$RELEASE_NOTE")"
-          echo "$CHANGELOG" > $RELEASE_NOTE
-
-          ./gradlew patchChangelog --release-note-file=$RELEASE_NOTE
-
-      # Publish the plugin to JetBrains Marketplace
-      - name: Publish Plugin
-        env:
-          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
-          CERTIFICATE_CHAIN: ${{ secrets.CERTIFICATE_CHAIN }}
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          PRIVATE_KEY_PASSWORD: ${{ secrets.PRIVATE_KEY_PASSWORD }}
-        run: ./gradlew publishPlugin
+      - name: Build plugin
+        run: ./gradlew buildPlugin
 
       # Upload an artifact as a release asset
       - name: Upload Release Asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ github.event.release.tag_name }} ./build/distributions/*
-
-      # Create a pull request
-      - name: Create Pull Request
-        if: ${{ github.event.release.body != '' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ github.event.release.tag_name }}"
-          BRANCH="changelog-update-$VERSION"
-          LABEL="release changelog"
-
-          git config user.email "action@github.com"
-          git config user.name "GitHub Action"
-
-          git checkout -b $BRANCH
-          git commit -am "Changelog update - $VERSION"
-          git push --set-upstream origin $BRANCH
-
-          gh label create "$LABEL" \
-            --description "Pull requests with release changelog update" \
-            --force \
-            || true
-
-          gh pr create \
-            --title "Changelog update - \`$VERSION\`" \
-            --body "Current pull request contains patched \`CHANGELOG.md\` file for the \`$VERSION\` version." \
-            --label "$LABEL" \
-            --head $BRANCH
+        run: gh release upload ${{ github.event.release.tag_name }} ./build/distributions/*.zip --clobber

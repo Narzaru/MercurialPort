@@ -1,59 +1,88 @@
 # hgrider
 
 ![Build](https://github.com/Narzaru/hgrider/workflows/Build/badge.svg)
-[![Version](https://img.shields.io/jetbrains/plugin/v/MARKETPLACE_ID.svg)](https://plugins.jetbrains.com/plugin/MARKETPLACE_ID)
-[![Downloads](https://img.shields.io/jetbrains/plugin/d/MARKETPLACE_ID.svg)](https://plugins.jetbrains.com/plugin/MARKETPLACE_ID)
 
-<!-- Plugin description -->
-**hgrider** brings practical Mercurial (hg) tools to JetBrains IDEs. It is a port of the
-[HgVs](https://github.com/) Visual Studio extension to the IntelliJ Platform.
+Инструменты Mercurial для JetBrains IDE (разрабатывается и используется в Rider). Порт расширения
+**HgVs** для Visual Studio на IntelliJ Platform.
 
-## Features
+Практическая задача — **«Upsource внутри IDE»**: просмотреть собственную ветку по файлам, отмечая
+просмотренные, не выходя в браузер и не поднимая внешний сервис ревью.
 
-- **Hg Changes** tool window — browse modified, added, removed and untracked files with several
-  comparison modes: uncommitted only, entire branch vs its parent, vs parent branch HEAD, or vs a
-  custom branch. Filter/exclude the list, open a file, open its Mercurial diff (Ctrl + double-click),
-  or revert selected files.
-- **TODO mode** — scan TODO comments in changed files, including unsaved editor buffers, refreshed
-  by polling.
-- **Hg File History** tool window — `hg log -f` for the selected file (context menu → *Hg File
-  History*), open a historical revision, and diff versions (vs previous, vs current file, or two
-  selected revisions).
-- **Hg Export** (Tools menu) — copy currently open editor files into a timestamped folder, or open
-  that folder in Total Commander.
+В JetBrains Marketplace плагин не публикуется — только сборки в
+[GitHub Releases](https://github.com/Narzaru/hgrider/releases).
 
-## Requirements
+## Hg Changes
 
-- The Mercurial command-line client available as `hg` on `PATH`.
-<!-- Plugin description end -->
+Дерево изменений ветки в стиле Upsource.
 
-## Installation
+- **Режимы сравнения**: только незакоммиченное, вся ветка относительно родителя, относительно HEAD
+  родительской ветки, относительно произвольной ветки.
+- **Дерево по каталогам** со схлопыванием цепочек из одного потомка (`Cad.Toolware.Tests/RayTracing`).
+  У файла — `+N −M`, у каталога — сумма по вложенным и счётчик `просмотрено/всего`.
+- **Отметки просмотра**: колонка-глаз, клик переключает отметку (у каталога — сразу для всех файлов
+  внутри), `Space` делает то же для выделения. Отметки хранятся в проекте и переживают refresh и
+  перезапуск IDE. В шапке — прогресс `12/59 reviewed`, кнопка сбрасывает всё.
+- **Клик — дифф, двойной клик — открыть файл.** Дифф открывается в одной переиспользуемой вкладке.
+- **Фильтры**: поля Filter/Exclude (скрыты, пока не нужны), переключатели «показывать
+  неотслеживаемые» и «показывать файлы без реальных изменений».
+- **Откат** выбранных файлов (`hg revert`) с подтверждением.
+- **Режим TODO**: TODO-комментарии в изменённых файлах, включая несохранённые буферы редактора.
+- Точные `+N −M` берутся из `hg diff --git` — не из `--stat`, поэтому файлы без настоящих изменений
+  видны и отделимы.
 
-- Using the IDE built-in plugin system:
+## Hg File History
 
-  <kbd>Settings/Preferences</kbd> > <kbd>Plugins</kbd> > <kbd>Marketplace</kbd> > <kbd>Search for "hgrider"</kbd> >
-  <kbd>Install</kbd>
+Полная история файла — `hg log -f`.
 
-- Using JetBrains Marketplace:
+- Панель следует за файлом в активном редакторе и за выбором в Hg Changes; пока окно скрыто, `hg`
+  не запускается.
+- **Клик по ревизии показывает, что именно она изменила**: сравнение с её первым родителем
+  (`{p1rev}`), а не со следующей строкой лога — при слияниях это разные ревизии.
+- **Переименования отслеживаются**: у родителя файл читается под прежним именем.
+- Ревизия, создавшая или удалившая файл, показывается с пустой стороной, а не ошибкой.
+- Выделены две ревизии — сравниваются между собой. Отдельным действием ревизию можно извлечь
+  во временную копию и открыть.
 
-  Go to [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/MARKETPLACE_ID) and install it by clicking the <kbd>Install to ...</kbd> button in case your IDE is running.
+## Hg Export
 
-  You can also download the [latest release](https://plugins.jetbrains.com/plugin/MARKETPLACE_ID/versions) from JetBrains Marketplace and install it manually using
-  <kbd>Settings/Preferences</kbd> > <kbd>Plugins</kbd> > <kbd>⚙️</kbd> > <kbd>Install plugin from disk...</kbd>
+В меню **Tools** — скопировать открытые в редакторе файлы в папку с отметкой времени или сразу
+открыть эту папку в Total Commander.
 
-- Manually:
+## Кодировки
 
-  Download the [latest release](https://github.com/Narzaru/hgrider/releases/latest) and install it manually using
-  <kbd>Settings/Preferences</kbd> > <kbd>Plugins</kbd> > <kbd>⚙️</kbd> > <kbd>Install plugin from disk...</kbd>
+Вывод `hg` декодируется построчно: сначала строгий UTF-8, при ошибке — запасная кодировка из
+настроек. По умолчанию это ANSI-кодировка системы (на русской Windows — cp1251), а не
+`Charset.defaultCharset()`, которая в современных JDK равна UTF-8 — иначе сообщения коммитов,
+набранные в cp1251, превращаются в «вопросики».
 
+Настройки: <kbd>Settings</kbd> → <kbd>Tools</kbd> → <kbd>hgrider (Mercurial)</kbd> — запасная
+кодировка и общая дифф-вкладка для обоих окон.
 
-## License
+## Требования
 
-[MIT](LICENSE) — do whatever you want with it; it comes with no warranty and the author carries no
-liability for what it does.
+- Клиент Mercurial, доступный как `hg` в `PATH`.
+- IDE на платформе сборки 252 и новее.
+
+## Установка
+
+Скачать zip из [последнего релиза](https://github.com/Narzaru/hgrider/releases/latest) и поставить
+через <kbd>Settings</kbd> → <kbd>Plugins</kbd> → <kbd>⚙️</kbd> →
+<kbd>Install Plugin from Disk…</kbd>, затем перезапустить IDE.
+
+## Сборка
+
+```powershell
+.\build-plugin.ps1                 # поднять patch-версию и собрать zip
+.\build-plugin.ps1 -Version 1.1.0  # версия явно
+.\build-plugin.ps1 -SkipBump       # пересобрать текущую
+```
+
+Версия поднимается перед каждой сборкой намеренно: при одинаковом номере установленный плагин
+неотличим от свежей сборки, и правки легко проверять на старом билде.
+
+## Лицензия
+
+[MIT](LICENSE) — использовать как угодно, без каких-либо гарантий и ответственности автора.
 
 ---
-Plugin based on the [IntelliJ Platform Plugin Template][template].
-
-[template]: https://github.com/JetBrains/intellij-platform-plugin-template
-[docs:plugin-description]: https://plugins.jetbrains.com/docs/intellij/plugin-user-experience.html#plugin-description-and-presentation
+Плагин создан на основе [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template).

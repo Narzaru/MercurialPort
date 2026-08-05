@@ -5,14 +5,21 @@
     <vendor>narzaru</vendor>
     <description><![CDATA[
         <p><b>hgrider</b> brings practical Mercurial (hg) tools to JetBrains IDEs.</p>
+        <p>The point is reviewing your own branch inside the IDE, file by file, the way Upsource does it.</p>
         <ul>
-            <li>Browse modified, added, removed and untracked files with different comparison modes
-                (uncommitted, entire branch vs parent, vs parent branch HEAD, vs custom branch).</li>
-            <li>Filter/exclude the file list, open files or their Mercurial diff, revert selected changes.</li>
-            <li>Navigate TODO comments in changed files, including unsaved editor buffers.</li>
-            <li>Inspect Mercurial file history and diff historical revisions.</li>
-            <li>Export open editor files to a directory or Total Commander.</li>
+            <li><b>Hg Changes</b>: an Upsource-style tree of branch changes with per-file <code>+N -M</code>,
+                comparison modes (uncommitted, entire branch vs parent, vs parent branch HEAD, vs custom
+                branch), filter/exclude and revert.</li>
+            <li><b>Review marks</b>: an eye column marks a file as reviewed — per directory as well —
+                with a progress counter; marks are stored per project and survive restarts.</li>
+            <li><b>Hg File History</b>: <code>hg log -f</code> for the file in the editor or selected in
+                Hg Changes. A revision is diffed against its first parent, renames are followed, and a
+                revision that creates or deletes the file renders an empty side.</li>
+            <li><b>TODO mode</b>: TODO comments in changed files, including unsaved editor buffers.</li>
+            <li><b>Hg Export</b>: copy open editor files to a folder or open it in Total Commander.</li>
         </ul>
+        <p>Output of <code>hg</code> is decoded line by line as UTF-8 with a configurable fallback
+        encoding, so commit messages written in a legacy codepage stay readable.</p>
         <p>Requires the Mercurial command-line client available as <code>hg</code> on <code>PATH</code>.</p>
     ]]></description>
 
