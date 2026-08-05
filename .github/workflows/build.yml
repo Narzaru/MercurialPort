@@ -17,6 +17,9 @@ on:
     branches: [ main ]
   # Trigger the workflow on any pull request
   pull_request:
+  # Позволяет запустить сборку кнопкой из UI — иначе перезапуск возможен только
+  # через Re-run прошлого прогона (а он выполняется на его же, старом коммите).
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
