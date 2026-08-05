@@ -4,16 +4,45 @@
     <name>hgrider</name>
     <vendor>narzaru</vendor>
     <description><![CDATA[
-        <p><b>hgrider</b> is a repository that provides a pure template to make it easier to create a new plugin project.</p>
-        <p>The main goal of this template is to speed up the setup phase of plugin development for both new and experienced developers by preconfiguring the project scaffold and CI, linking to the proper documentation pages, and keeping everything organized.</p>
+        <p><b>hgrider</b> brings practical Mercurial (hg) tools to JetBrains IDEs.</p>
+        <ul>
+            <li>Browse modified, added, removed and untracked files with different comparison modes
+                (uncommitted, entire branch vs parent, vs parent branch HEAD, vs custom branch).</li>
+            <li>Filter/exclude the file list, open files or their Mercurial diff, revert selected changes.</li>
+            <li>Navigate TODO comments in changed files, including unsaved editor buffers.</li>
+            <li>Inspect Mercurial file history and diff historical revisions.</li>
+            <li>Export open editor files to a directory or Total Commander.</li>
+        </ul>
+        <p>Requires the Mercurial command-line client available as <code>hg</code> on <code>PATH</code>.</p>
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
 
-    <resource-bundle>messages.MyBundle</resource-bundle>
-
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.narzaru.hgrider.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
-        <postStartupActivity implementation="com.github.narzaru.hgrider.startup.MyProjectActivity" />
+        <toolWindow id="Hg Changes"
+                    anchor="bottom"
+                    factoryClass="com.github.narzaru.hgrider.changes.HgChangesToolWindowFactory"/>
+        <applicationConfigurable parentId="tools"
+                                 id="hgrider.settings"
+                                 displayName="hgrider (Mercurial)"
+                                 instance="com.github.narzaru.hgrider.hg.HgSettingsConfigurable"/>
+        <toolWindow id="Hg File History"
+                    anchor="bottom"
+                    secondary="true"
+                    factoryClass="com.github.narzaru.hgrider.history.HgFileHistoryToolWindowFactory"/>
     </extensions>
+
+    <actions>
+        <group id="hgrider.ExportGroup" text="Hg Export" popup="true">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <action id="hgrider.ExportOpenFiles"
+                    class="com.github.narzaru.hgrider.export.ExportOpenFilesAction"
+                    text="Export Open Files to Folder"
+                    description="Copy currently open editor files into a folder"/>
+            <action id="hgrider.ExportToTotalCommander"
+                    class="com.github.narzaru.hgrider.export.ExportToTotalCommanderAction"
+                    text="Export Open Files to Total Commander"
+                    description="Copy open editor files and open the folder in Total Commander"/>
+        </group>
+    </actions>
 </idea-plugin>
