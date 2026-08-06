@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-08-06
+### Fixed
+- Hg Changes listed no removed files: `hg status` was called with `-ma` only, so every `R` entry was
+  dropped and a branch showed fewer files than the same review on Upsource. Files deleted outside hg
+  (`!`) are listed too, and share the red status colour with `R`.
+
 ## [1.0.1] - 2026-08-06
 ### Changed
 - The plugin is called **Mercurial Port** in the IDE: Plugin Verifier rejects a descriptor whose name

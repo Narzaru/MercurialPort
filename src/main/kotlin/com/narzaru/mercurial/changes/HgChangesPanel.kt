@@ -741,8 +741,11 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
         val baseInfo = runner.run("log", "-r", targetRev, "--template", template)
             .stdout.ifBlank { "Unknown|?|?" }
 
+        // `r` — удалённые файлы: без него список ветки молча короче, чем на Upsource.
+        // `d` — стёртые мимо hg (`!`); при сравнении ревизий таких не бывает, но в режиме
+        // Uncommitted Only без него файл пропадает из списка вместо того, чтобы попасть в глаза.
         val flags = buildString {
-            append("-ma")
+            append("-mard")
             if (untracked) append("u")
         }
 
@@ -1156,7 +1159,8 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun statusColor(status: String?): Color = when (status) {
         "A" -> JBColor(Color(60, 140, 80), Color(98, 181, 118))
         "M" -> JBColor(Color(60, 100, 190), Color(110, 160, 240))
-        "R" -> JBColor(Color(180, 70, 70), Color(220, 110, 110))
+        // `!` — то же удаление, что и `R`, только сделанное мимо hg: цвет общий.
+        "R", "!" -> JBColor(Color(180, 70, 70), Color(220, 110, 110))
         "?" -> JBColor(Color(150, 70, 190), Color(190, 130, 220))
         else -> JBColor.GRAY
     }
