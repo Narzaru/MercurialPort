@@ -1,4 +1,4 @@
-package com.github.narzaru.hgrider.export
+package com.narzaru.mercurial.export
 
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent

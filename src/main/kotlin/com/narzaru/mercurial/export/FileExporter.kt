@@ -1,4 +1,4 @@
-package com.github.narzaru.hgrider.export
+package com.narzaru.mercurial.export
 
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.fileChooser.FileChooser
@@ -17,7 +17,7 @@ import java.util.Date
  */
 object FileExporter {
 
-    private const val TARGET_DIR_KEY = "hgrider.export.targetDir"
+    private const val TARGET_DIR_KEY = "mercurial.export.targetDir"
 
     /** @return путь к созданной папке дампа или null, если экспорт отменён/не удался. */
     fun dumpOpenFiles(project: Project, forceChooseDir: Boolean): String? {

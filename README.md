@@ -1,9 +1,12 @@
-# hgrider
+# Mercurial Port
 
 ![Build](https://github.com/Narzaru/hgrider/workflows/Build/badge.svg)
 
 Инструменты Mercurial для JetBrains IDE (разрабатывается и используется в Rider). Порт расширения
 **HgVs** для Visual Studio на IntelliJ Platform.
+
+Репозиторий называется `hgrider`, но в списке плагинов IDE — **Mercurial Port**: Plugin Verifier
+не пропускает имя, содержащее название продукта JetBrains, а в `hgrider` есть `rider`.
 
 Практическая задача — **«Upsource внутри IDE»**: просмотреть собственную ветку по файлам, отмечая
 просмотренные, не выходя в браузер и не поднимая внешний сервис ревью.
@@ -55,7 +58,7 @@
 `Charset.defaultCharset()`, которая в современных JDK равна UTF-8 — иначе сообщения коммитов,
 набранные в cp1251, превращаются в «вопросики».
 
-Настройки: <kbd>Settings</kbd> → <kbd>Tools</kbd> → <kbd>hgrider (Mercurial)</kbd> — запасная
+Настройки: <kbd>Settings</kbd> → <kbd>Tools</kbd> → <kbd>Mercurial Port</kbd> — запасная
 кодировка и общая дифф-вкладка для обоих окон.
 
 ## Требования

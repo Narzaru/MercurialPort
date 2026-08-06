@@ -1,7 +1,7 @@
-package com.github.narzaru.hgrider.diff
+package com.narzaru.mercurial.diff
 
-import com.github.narzaru.hgrider.hg.HgSettings
-import com.github.narzaru.hgrider.history.HgFileHistoryService
+import com.narzaru.mercurial.hg.HgSettings
+import com.narzaru.mercurial.history.HgFileHistoryService
 import com.intellij.diff.chains.SimpleDiffRequestChain
 import com.intellij.diff.editor.ChainDiffVirtualFile
 import com.intellij.diff.editor.DiffEditorTabFilesManager

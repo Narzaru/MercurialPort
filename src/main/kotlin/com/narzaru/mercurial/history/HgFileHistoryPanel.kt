@@ -1,9 +1,9 @@
-package com.github.narzaru.hgrider.history
+package com.narzaru.mercurial.history
 
-import com.github.narzaru.hgrider.diff.HgDiffTabManager
-import com.github.narzaru.hgrider.hg.HgCommandRunner
-import com.github.narzaru.hgrider.hg.HgOutputDecoder
-import com.github.narzaru.hgrider.model.HgHistoryItem
+import com.narzaru.mercurial.diff.HgDiffTabManager
+import com.narzaru.mercurial.hg.HgCommandRunner
+import com.narzaru.mercurial.hg.HgOutputDecoder
+import com.narzaru.mercurial.model.HgHistoryItem
 import com.intellij.diff.DiffContentFactory
 import com.intellij.diff.requests.SimpleDiffRequest
 import com.intellij.icons.AllIcons

@@ -1,6 +1,8 @@
 # CLAUDE.md
 
-Плагин **hgrider** — инструменты Mercurial для JetBrains IDE (используется в Rider). Порт расширения
+Плагин **hgrider** (в IDE отображается как **Mercurial Port** — имя плагина не должно
+содержать названий продуктов JetBrains, а `hgrider` содержит `rider`) — инструменты Mercurial
+для JetBrains IDE (используется в Rider). Порт расширения
 HgVs для Visual Studio. Практическая цель — «Upsource внутри IDE»: ревью собственной ветки по файлам
 с отметками «просмотрено».
 
@@ -8,7 +10,7 @@ HgVs для Visual Studio. Практическая цель — «Upsource вн
 
 ```bash
 ./gradlew compileKotlin     # быстрая проверка компиляции
-./gradlew buildPlugin       # артефакт build/distributions/hgrider-<version>.zip
+./gradlew buildPlugin       # артефакт build/distributions/mercurial-port-<version>.zip
 ./gradlew runIde            # запуск IDE с плагином
 ```
 
@@ -32,14 +34,16 @@ HgVs для Visual Studio. Практическая цель — «Upsource вн
 в установленном плагине, нужен `buildPlugin`. Убедиться, что установлено именно новое, можно так:
 
 ```bash
-unzip -p "$APPDATA/JetBrains/Rider<версия>/plugins/hgrider/lib/hgrider-<version>.jar" \
-  com/github/narzaru/hgrider/history/HgFileHistoryPanel.class | grep -c "<новая строка из правки>"
+unzip -p "$APPDATA/JetBrains/Rider<версия>/plugins/mercurial-port/lib/mercurial-port-<version>.jar" \
+  com/narzaru/mercurial/history/HgFileHistoryPanel.class | grep -c "<новая строка из правки>"
 ```
 
 Ошибки времени выполнения ищутся в `%LOCALAPPDATA%\JetBrains\Rider<версия>\log\idea.log` —
 падение в конструкторе панели проявляется как пустое тул-окно с «Nothing to show», а не как диалог.
 
 ## Структура
+
+Корень пакетов — `com.narzaru.mercurial`.
 
 | Пакет | Содержимое |
 |---|---|
@@ -59,7 +63,7 @@ unzip -p "$APPDATA/JetBrains/Rider<версия>/plugins/hgrider/lib/hgrider-<ve
 `HgSettings.fallbackEncoding`. По умолчанию это ANSI-кодировка ОС (`sun.jnu.encoding`, на русской
 Windows — cp1251), а **не** `Charset.defaultCharset()`: в JDK 18+ последняя равна UTF-8, из-за чего
 сообщения коммитов в cp1251 превращались в «вопросики». Настраивается в
-`Settings → Tools → hgrider (Mercurial)`.
+`Settings → Tools → Mercurial Port`.
 
 Декодер также срезает UTF-8 BOM в начале вывода: `hg cat` отдаёт файл как есть, а платформа в
 редакторе BOM снимает — иначе первая строка диффа всегда «отличалась» на невидимый U+FEFF.

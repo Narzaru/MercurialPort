@@ -1,6 +1,6 @@
-package com.github.narzaru.hgrider.changes
+package com.narzaru.mercurial.changes
 
-import com.github.narzaru.hgrider.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileItem
 import javax.swing.tree.DefaultMutableTreeNode
 
 /** Каталог в дереве изменений. `name` может покрывать несколько уровней: `Cad.Toolware.Tests/RayTracing`. */

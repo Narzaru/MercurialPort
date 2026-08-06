@@ -1,4 +1,4 @@
-package com.github.narzaru.hgrider.changes
+package com.narzaru.mercurial.changes
 
 import java.awt.Container
 import java.awt.Dimension

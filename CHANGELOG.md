@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-06
+### Changed
+- The plugin is called **Mercurial Port** in the IDE: Plugin Verifier rejects a descriptor whose name
+  contains a JetBrains product name, and `hgrider` contains `rider`. The repository, the artifact and
+  the zip keep the old name.
+- Packages moved from `com.github.narzaru.hgrider` to `com.narzaru.mercurial`, and the plugin id with
+  them. The IDE therefore treats this as a different plugin — uninstall the previous one.
+- Settings page is now titled `Mercurial Port` (`Settings → Tools`).
+- Stored setting keys, action ids and the distribution name follow the rename too: `hgrider.*` keys
+  became `mercurial.*` and the artifact is `mercurial-port-<version>.zip`. Review marks, filters and
+  the fallback encoding are therefore reset once — acceptable, the plugin has a single user.
+
 ## [1.0.0] - 2026-08-05
 ### Added
 - **One diff tab for the whole plugin** (`HgDiffTabManager`): Hg Changes and Hg File History used to keep

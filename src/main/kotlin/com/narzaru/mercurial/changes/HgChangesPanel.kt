@@ -1,14 +1,14 @@
-package com.github.narzaru.hgrider.changes
+package com.narzaru.mercurial.changes
 
-import com.github.narzaru.hgrider.diff.HgDiffTabManager
-import com.github.narzaru.hgrider.hg.HgCommandRunner
-import com.github.narzaru.hgrider.hg.HgOutputDecoder
-import com.github.narzaru.hgrider.hg.HgSettingsConfigurable
-import com.github.narzaru.hgrider.history.HgFileHistoryService
-import com.github.narzaru.hgrider.model.HgDiffStat
-import com.github.narzaru.hgrider.model.HgDisplayMode
-import com.github.narzaru.hgrider.model.HgFileItem
-import com.github.narzaru.hgrider.model.HgListMode
+import com.narzaru.mercurial.diff.HgDiffTabManager
+import com.narzaru.mercurial.hg.HgCommandRunner
+import com.narzaru.mercurial.hg.HgOutputDecoder
+import com.narzaru.mercurial.hg.HgSettingsConfigurable
+import com.narzaru.mercurial.history.HgFileHistoryService
+import com.narzaru.mercurial.model.HgDiffStat
+import com.narzaru.mercurial.model.HgDisplayMode
+import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgListMode
 import com.intellij.diff.DiffContentFactory
 import com.intellij.diff.requests.SimpleDiffRequest
 import com.intellij.icons.AllIcons
@@ -80,7 +80,7 @@ import javax.swing.tree.TreePath
  */
 class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
 
-    private val propertiesKeyPrefix = "hgrider."
+    private val propertiesKeyPrefix = "mercurial."
 
     // Состояние
     private var displayMode = HgDisplayMode.UNCOMMITTED
@@ -481,7 +481,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun installReviewToggleShortcut() {
-        val key = "hgrider.toggleReviewed"
+        val key = "mercurial.toggleReviewed"
         tree.inputMap.put(KeyStroke.getKeyStroke("SPACE"), key)
         tree.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
             .put(KeyStroke.getKeyStroke("SPACE"), key)

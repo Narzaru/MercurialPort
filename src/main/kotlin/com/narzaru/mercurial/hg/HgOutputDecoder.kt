@@ -1,4 +1,4 @@
-package com.github.narzaru.hgrider.hg
+package com.narzaru.mercurial.hg
 
 import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction

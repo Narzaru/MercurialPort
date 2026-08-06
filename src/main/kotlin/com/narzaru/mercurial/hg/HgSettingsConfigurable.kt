@@ -1,4 +1,4 @@
-package com.github.narzaru.hgrider.hg
+package com.narzaru.mercurial.hg
 
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.ui.ComboBox
@@ -16,7 +16,7 @@ class HgSettingsConfigurable : Configurable {
 
     private val sharedTabCheck = JCheckBox("Показывать дифф Hg Changes и Hg File History в одной вкладке")
 
-    override fun getDisplayName() = "hgrider (Mercurial)"
+    override fun getDisplayName() = "Mercurial Port"
 
     /**
      * UI DSL, а не FormBuilder: `JBLabel` с `<html>` без заданной ширины раскладывается

@@ -1,4 +1,4 @@
-package com.github.narzaru.hgrider.model
+package com.narzaru.mercurial.model
 
 import java.io.File
 

@@ -1,10 +1,10 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
-    <id>com.github.narzaru.hgrider</id>
-    <name>hgrider</name>
+    <id>com.narzaru.mercurial</id>
+    <name>Mercurial Port</name>
     <vendor>narzaru</vendor>
     <description><![CDATA[
-        <p><b>hgrider</b> brings practical Mercurial (hg) tools to JetBrains IDEs.</p>
+        <p><b>Mercurial Port</b> brings practical Mercurial (hg) tools to JetBrains IDEs.</p>
         <p>The point is reviewing your own branch inside the IDE, file by file, the way Upsource does it.</p>
         <ul>
             <li><b>Hg Changes</b>: an Upsource-style tree of branch changes with per-file <code>+N -M</code>,
@@ -28,26 +28,26 @@
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow id="Hg Changes"
                     anchor="bottom"
-                    factoryClass="com.github.narzaru.hgrider.changes.HgChangesToolWindowFactory"/>
+                    factoryClass="com.narzaru.mercurial.changes.HgChangesToolWindowFactory"/>
         <applicationConfigurable parentId="tools"
-                                 id="hgrider.settings"
-                                 displayName="hgrider (Mercurial)"
-                                 instance="com.github.narzaru.hgrider.hg.HgSettingsConfigurable"/>
+                                 id="mercurial.settings"
+                                 displayName="Mercurial Port"
+                                 instance="com.narzaru.mercurial.hg.HgSettingsConfigurable"/>
         <toolWindow id="Hg File History"
                     anchor="bottom"
                     secondary="true"
-                    factoryClass="com.github.narzaru.hgrider.history.HgFileHistoryToolWindowFactory"/>
+                    factoryClass="com.narzaru.mercurial.history.HgFileHistoryToolWindowFactory"/>
     </extensions>
 
     <actions>
-        <group id="hgrider.ExportGroup" text="Hg Export" popup="true">
+        <group id="mercurial.ExportGroup" text="Hg Export" popup="true">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
-            <action id="hgrider.ExportOpenFiles"
-                    class="com.github.narzaru.hgrider.export.ExportOpenFilesAction"
+            <action id="mercurial.ExportOpenFiles"
+                    class="com.narzaru.mercurial.export.ExportOpenFilesAction"
                     text="Export Open Files to Folder"
                     description="Copy currently open editor files into a folder"/>
-            <action id="hgrider.ExportToTotalCommander"
-                    class="com.github.narzaru.hgrider.export.ExportToTotalCommanderAction"
+            <action id="mercurial.ExportToTotalCommander"
+                    class="com.narzaru.mercurial.export.ExportToTotalCommanderAction"
                     text="Export Open Files to Total Commander"
                     description="Copy open editor files and open the folder in Total Commander"/>
         </group>

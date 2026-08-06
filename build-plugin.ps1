@@ -54,9 +54,11 @@ if ($next -ne $current) {
 & (Join-Path $PSScriptRoot 'gradlew.bat') buildPlugin -q
 if ($LASTEXITCODE -ne 0) { throw "buildPlugin завершился с кодом $LASTEXITCODE" }
 
-$zip = Join-Path $PSScriptRoot "build\distributions\hgrider-$next.zip"
-if (-not (Test-Path $zip)) { throw "Ожидался $zip, но его нет" }
-$info = Get-Item $zip
+# Имя артефакта берётся из rootProject.name, поэтому ищем по версии, а не по фиксированному имени.
+$info = Get-ChildItem (Join-Path $PSScriptRoot 'build\distributions') -Filter "*-$next.zip" |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+if (-not $info) { throw "В build\distributions нет zip версии $next" }
 Write-Host ''
 Write-Host "Готово: $($info.FullName)"
 Write-Host ("  {0:N0} байт, {1:HH:mm:ss}" -f $info.Length, $info.LastWriteTime)

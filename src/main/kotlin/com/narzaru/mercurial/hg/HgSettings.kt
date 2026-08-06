@@ -1,4 +1,4 @@
-package com.github.narzaru.hgrider.hg
+package com.narzaru.mercurial.hg
 
 import com.intellij.ide.util.PropertiesComponent
 import java.nio.charset.Charset
@@ -13,8 +13,8 @@ import java.nio.charset.Charset
  */
 object HgSettings {
 
-    private const val ENCODING_KEY = "hgrider.fallbackEncoding"
-    private const val SHARED_DIFF_TAB_KEY = "hgrider.sharedDiffTab"
+    private const val ENCODING_KEY = "mercurial.fallbackEncoding"
+    private const val SHARED_DIFF_TAB_KEY = "mercurial.sharedDiffTab"
 
     /** Кодировки, которые предлагаем в настройках; список открытый — можно вписать своё имя. */
     val suggestedEncodings: List<String> = listOf(

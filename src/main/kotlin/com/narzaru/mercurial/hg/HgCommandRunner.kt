@@ -1,4 +1,4 @@
-package com.github.narzaru.hgrider.hg
+package com.narzaru.mercurial.hg
 
 import com.intellij.execution.configurations.GeneralCommandLine
 import java.io.File

@@ -1,4 +1,4 @@
-package com.github.narzaru.hgrider.history
+package com.narzaru.mercurial.history
 
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
