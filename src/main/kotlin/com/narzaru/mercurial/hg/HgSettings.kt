@@ -28,7 +28,10 @@ object HgSettings {
             ?: Charset.defaultCharset().name()
 
     var fallbackEncoding: String
-        get() = PropertiesComponent.getInstance().getValue(ENCODING_KEY, systemDefault)
+        // runCatching — не для порчи настроек, а для запуска вне IDE: в юнит-тестах
+        // разбора вывода hg приложения нет и PropertiesComponent.getInstance() падает.
+        get() = runCatching { PropertiesComponent.getInstance().getValue(ENCODING_KEY, systemDefault) }
+            .getOrNull() ?: systemDefault
         set(value) = PropertiesComponent.getInstance().setValue(ENCODING_KEY, value, systemDefault)
 
     /**

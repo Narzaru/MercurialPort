@@ -4,6 +4,60 @@
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-08-07
+### Added
+- **Landing on a file marks it reviewed.** Selecting a row is what counts as reviewing it, so a
+  single click *and* arrow-key navigation both show the diff and tick the eye — the review advances
+  without a separate keystroke per file. `Mark Reviewed on Open` in the ⋮ menu (next to
+  `Show ± Column`) turns the marking off and leaves the diff; on by default.
+- Arrow navigation is debounced by 250 ms, so holding the key down to reach a file does not mark
+  every row on the way — nor spawn an `hg cat` per row, of which only the last would be used.
+  Mouse clicks stay immediate.
+
+- **Base revision content is cached and prefetched.** `hg version` alone takes ~265 ms — that is
+  Mercurial starting up, before any work; every `hg cat` pays it while the file read itself is free.
+  Content of a revision never changes, so it is kept in an LRU cache (`HgContentCache`, negative
+  answers included), and the neighbouring rows are read ahead, which makes the next diff ready
+  before the arrow key is pressed. The cache is dropped on every refresh: the base revision is
+  written symbolically (`.`) and points at different content after a commit.
+
+### Changed
+- Reviewed files are greyed out, not merely un-bolded — the same treatment as files with no real
+  changes, since both are rows there is nothing left to do about.
+- **Double click opens the file and no longer pulls the diff back on top.** The diff requested by
+  the first of the two clicks is cancelled, so the editor ends up on the file instead of bouncing
+  file → diff. The diff still opens if the two clicks are far enough apart to not read as a double
+  click; avoiding that entirely would need a delay on every single click.
+- Tree selection survives a rebuild: marking a file reviewed re-renders the whole tree, which used
+  to drop the selection on every step of a review.
+
+### Removed
+- Hg Changes no longer follows the active editor. Closing the file and its diff made the editor fall
+  back to a neighbouring tab, which the panel read as a deliberate open and answered with yet another
+  diff — reopening what had just been closed. Nothing drives the panel now except the panel itself.
+  `HgChangesService` and `ChangeLookup` went with it.
+- `HgChangesPanel` shrank from ~1200 lines to ~900: everything that is not UI moved out of it.
+  Parsing of `hg` output lives in `hg` (`HgStatusParser`, `HgDiffStatParser`, `HgLogParser`,
+  `HgPaths`), review marks in `changes/ReviewState` behind a `ReviewedPathsStore`, settings keys in
+  `changes/ChangesSettings`, filtering in `changes/PathFilter`, status-bar strings in
+  `changes/StatusTextFormatter`, and the three cell renderers plus ellipsis fitting in
+  `changes/ChangesTreeRenderers` and `changes/TextFitter`. Behaviour is unchanged; the point is that
+  none of it could be covered by a test while it sat inside a Swing component.
+- `HgFileHistoryPanel` and `FileExporter` use the shared `HgPaths`/`HgLogParser` instead of their own
+  copies of path relativization and log parsing.
+- `HgOutputDecoder.decode` takes an optional explicit fallback charset, so decoding can be tested
+  without a running IDE; `HgSettings.fallbackEncoding` degrades to the system default when no
+  application is available instead of throwing.
+- Magic numbers in the panel became named constants (column widths, debounce and TODO poll delays,
+  the revert confirmation preview limit), and `TodoParser`'s binary-file guard is now spelled
+  `'\u0000'` — the raw character in the source was indistinguishable from a space.
+
+### Added
+- Test suite (94 JUnit tests) covering the extracted logic: status/diff/log parsing, encoding
+  fallback and BOM handling, path normalization, the tree builder (directory collapsing, ordering,
+  aggregates), review marks, filters, TODO scanning and ellipsis fitting. `./gradlew test` needs
+  network access on a clean checkout — junit and the platform test framework are not vendored.
+
 ## [1.0.2] - 2026-08-06
 ### Fixed
 - Hg Changes listed no removed files: `hg status` was called with `-ma` only, so every `R` entry was

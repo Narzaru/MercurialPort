@@ -2,7 +2,9 @@ package com.narzaru.mercurial.history
 
 import com.narzaru.mercurial.diff.HgDiffTabManager
 import com.narzaru.mercurial.hg.HgCommandRunner
+import com.narzaru.mercurial.hg.HgLogParser
 import com.narzaru.mercurial.hg.HgOutputDecoder
+import com.narzaru.mercurial.hg.HgPaths
 import com.narzaru.mercurial.model.HgHistoryItem
 import com.intellij.diff.DiffContentFactory
 import com.intellij.diff.requests.SimpleDiffRequest
@@ -223,32 +225,10 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
                 return@executeOnPooledThread
             }
             repoRoot = root
-            val rel = relativePath(file, root)
+            val rel = HgPaths.relativize(file, root)
             val runner = HgCommandRunner(root)
-            // Копии печатаем своим разделителем: у `{file_copies}` записи «new (old)»
-            // разделены пробелом и неразличимы, если в пути есть пробел.
-            val tmpl = "{rev}|{node|short}|{author|person}|{date|isodate}|{p1rev}|" +
-                "{file_copies % '{source}=>{name};'}|{desc|firstline}"
-            val res = runner.run("log", "-f", rel, "--template", "$tmpl\n")
-            val items = ArrayList<HgHistoryItem>()
-            if (res.success) {
-                // Список идёт от новых к старым, поэтому путь «отматываем» назад:
-                // переименование в ревизии R означает, что у всех предков имя было старым.
-                var pathAtRev = rel.replace('\\', '/')
-                for (line in res.stdout.split('\r', '\n')) {
-                    if (line.isBlank()) continue
-                    val p = line.split('|', limit = 7)
-                    if (p.size != 7) continue
-                    val parentPath = copySourceOf(p[5], pathAtRev) ?: pathAtRev
-                    items.add(
-                        HgHistoryItem(
-                            revision = p[0], node = p[1], author = p[2], date = p[3], message = p[6],
-                            path = pathAtRev, parentRev = p[4], parentPath = parentPath
-                        )
-                    )
-                    pathAtRev = parentPath
-                }
-            }
+            val res = runner.run("log", "-f", rel, "--template", "${HgLogParser.TEMPLATE}\n")
+            val items = if (res.success) HgLogParser.parse(res.stdout, rel) else emptyList()
             onEdt {
                 if (requestId != historyRequestId) return@onEdt // пришёл более свежий запрос
                 if (!res.success && items.isEmpty()) {
@@ -269,7 +249,7 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         val item = selectedItems().firstOrNull() ?: return
         val root = repoRoot ?: return
         val file = targetFile ?: return
-        val rel = item.path.ifBlank { relativePath(file, root) }
+        val rel = item.path.ifBlank { HgPaths.relativize(file, root) }
         ApplicationManager.getApplication().executeOnPooledThread {
             val tmp = extractFile(root, rel, item, "open") ?: return@executeOnPooledThread
             onEdt {
@@ -378,21 +358,6 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         return null
     }
 
-    /**
-     * Ищет в списке копий ревизии (`source=>name;`) запись, создавшую [path],
-     * и возвращает исходное имя — путь этого же файла у родительской ревизии.
-     */
-    private fun copySourceOf(copies: String, path: String): String? {
-        for (entry in copies.split(';')) {
-            val sep = entry.indexOf("=>")
-            if (sep < 0) continue
-            val source = entry.substring(0, sep)
-            val name = entry.substring(sep + 2)
-            if (name.equals(path, ignoreCase = true) && source.isNotBlank()) return source
-        }
-        return null
-    }
-
     private fun extractFile(root: File, rel: String, item: HgHistoryItem, prefix: String): File? {
         val name = File(rel).name
         val dot = name.lastIndexOf('.')
@@ -410,16 +375,6 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
             tmp
         } catch (_: Exception) {
             null
-        }
-    }
-
-    private fun relativePath(file: File, root: File): String {
-        val full = file.absolutePath
-        val prefix = root.absolutePath
-        return if (full.startsWith(prefix, ignoreCase = true)) {
-            full.substring(prefix.length).trimStart('\\', '/')
-        } else {
-            file.name
         }
     }
 

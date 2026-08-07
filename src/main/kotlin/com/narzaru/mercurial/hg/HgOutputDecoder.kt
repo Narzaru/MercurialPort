@@ -11,11 +11,13 @@ import java.nio.charset.CodingErrorAction
  */
 object HgOutputDecoder {
 
-    fun decode(bytes: ByteArray): String {
+    // Кодировку читаем один раз на вызов: обращаться к настройке на каждую строку слишком дорого.
+    fun decode(bytes: ByteArray): String = decode(bytes, HgSettings.fallbackCharset())
+
+    /** Та же логика с явной кодировкой отката — без обращения к настройкам плагина. */
+    fun decode(bytes: ByteArray, fallback: Charset): String {
         if (bytes.isEmpty()) return ""
 
-        // Кодировку берём один раз на вызов: чтение настройки на каждую строку слишком дорого.
-        val fallback = HgSettings.fallbackCharset()
         val result = StringBuilder(bytes.size)
         // hg cat отдаёт файл как есть, вместе с BOM. В редакторе платформа BOM снимает,
         // поэтому иначе первая строка диффа всегда «отличалась» на невидимый U+FEFF.

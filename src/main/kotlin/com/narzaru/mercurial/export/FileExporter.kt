@@ -1,5 +1,6 @@
 package com.narzaru.mercurial.export
 
+import com.narzaru.mercurial.hg.HgPaths
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
@@ -39,11 +40,10 @@ object FileExporter {
             val source = File(vf.path)
             if (!source.isFile) continue
 
-            val relative = if (source.absolutePath.startsWith(projectRoot.absolutePath, ignoreCase = true)) {
-                source.absolutePath.substring(projectRoot.absolutePath.length).trimStart('\\', '/')
-            } else {
-                File("_External", source.name).path
-            }
+            // Файлы вне проекта складываем отдельной папкой: относительного пути у них нет,
+            // а свалить их в корень дампа — потерять те, чьи имена совпали.
+            val relative = HgPaths.relativize(source.absolutePath, projectRoot.absolutePath)
+                ?: File("_External", source.name).path
 
             val dest = File(sessionDir, relative)
             dest.parentFile?.mkdirs()
