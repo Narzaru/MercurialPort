@@ -1,18 +1,19 @@
 # Mercurial Port
 
-![Build](https://github.com/Narzaru/hgrider/workflows/Build/badge.svg)
+![Build](https://github.com/Narzaru/MercurialPort/workflows/Build/badge.svg)
 
 Инструменты Mercurial для JetBrains IDE (разрабатывается и используется в Rider). Порт расширения
 **HgVs** для Visual Studio на IntelliJ Platform.
 
-Репозиторий называется `hgrider`, но в списке плагинов IDE — **Mercurial Port**: Plugin Verifier
-не пропускает имя, содержащее название продукта JetBrains, а в `hgrider` есть `rider`.
+Артефакт и Gradle-проект называются `mercurial-port`; в списке плагинов IDE — **Mercurial Port**.
+Прежнее имя `hgrider` пришлось оставить: Plugin Verifier не пропускает имя, содержащее название
+продукта JetBrains, а в `hgrider` есть `rider`.
 
 Практическая задача — **«Upsource внутри IDE»**: просмотреть собственную ветку по файлам, отмечая
 просмотренные, не выходя в браузер и не поднимая внешний сервис ревью.
 
 В JetBrains Marketplace плагин не публикуется — только сборки в
-[GitHub Releases](https://github.com/Narzaru/hgrider/releases).
+[GitHub Releases](https://github.com/Narzaru/MercurialPort/releases).
 
 ## Hg Changes
 
@@ -25,7 +26,11 @@
 - **Отметки просмотра**: колонка-глаз, клик переключает отметку (у каталога — сразу для всех файлов
   внутри), `Space` делает то же для выделения. Отметки хранятся в проекте и переживают refresh и
   перезапуск IDE. В шапке — прогресс `12/59 reviewed`, кнопка сбрасывает всё.
+- **Переход на файл и есть его просмотр**: клик и стрелки показывают дифф и ставят отметку, так что
+  ветка проходится одними стрелками. Отключается пунктом `Mark Reviewed on Open` в меню ⋮.
 - **Клик — дифф, двойной клик — открыть файл.** Дифф открывается в одной переиспользуемой вкладке.
+- Содержимое базовой ревизии кэшируется, соседние строки дочитываются заранее: запуск `hg` стоит
+  около четверти секунды, и без этого каждый шаг по списку упирался бы в него.
 - **Фильтры**: поля Filter/Exclude (скрыты, пока не нужны), переключатели «показывать
   неотслеживаемые» и «показывать файлы без реальных изменений».
 - **Откат** выбранных файлов (`hg revert`) с подтверждением.
@@ -68,7 +73,7 @@
 
 ## Установка
 
-Скачать zip из [последнего релиза](https://github.com/Narzaru/hgrider/releases/latest) и поставить
+Скачать zip из [последнего релиза](https://github.com/Narzaru/MercurialPort/releases/latest) и поставить
 через <kbd>Settings</kbd> → <kbd>Plugins</kbd> → <kbd>⚙️</kbd> →
 <kbd>Install Plugin from Disk…</kbd>, затем перезапустить IDE.
 

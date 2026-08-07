@@ -7,7 +7,7 @@ import java.nio.charset.Charset
 import javax.swing.JCheckBox
 import javax.swing.JComponent
 
-/** Settings → Tools → hgrider. */
+/** Settings → Tools → Mercurial Port. */
 class HgSettingsConfigurable : Configurable {
 
     private val encodingCombo = ComboBox(HgSettings.suggestedEncodings.toTypedArray()).apply {
