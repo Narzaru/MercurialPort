@@ -42,6 +42,44 @@ class HgStatusParserTest {
     }
 
     @Test
+    fun `строка с отступом это источник копии предыдущего файла`() {
+        val items = HgStatusParser.parse("A src/new.kt\n  src/old.kt\nM other.kt\n")
+
+        assertEquals(listOf("src/new.kt", "other.kt"), items.map { it.path })
+        assertEquals("src/old.kt", items[0].copiedFrom)
+        assertEquals("", items[1].copiedFrom)
+    }
+
+    @Test
+    fun `переименование сводится в одну строку`() {
+        val items = HgStatusParser.foldRenames(
+            HgStatusParser.parse("A src/new.kt\n  src/old.kt\nR src/old.kt\n")
+        )
+
+        val item = items.single()
+        assertEquals(HgStatusParser.RENAMED_STATUS, item.status)
+        assertEquals("src/new.kt", item.path)
+        assertEquals("src/old.kt", item.copiedFrom)
+    }
+
+    @Test
+    fun `копия остаётся добавлением, источник на месте`() {
+        val items = HgStatusParser.foldRenames(
+            HgStatusParser.parse("A src/copy.kt\n  src/orig.kt\nM src/orig.kt\n")
+        )
+
+        assertEquals(listOf("A", "M"), items.map { it.status })
+        assertEquals("src/orig.kt", items[0].copiedFrom)
+    }
+
+    @Test
+    fun `удаление без пары остаётся в списке`() {
+        val items = HgStatusParser.foldRenames(HgStatusParser.parse("R src/gone.kt\nA src/new.kt\n"))
+
+        assertEquals(listOf("R", "A"), items.map { it.status })
+    }
+
+    @Test
     fun `флаг неотслеживаемых добавляется только по требованию`() {
         assertEquals("-mard", HgStatusParser.statusFlags(includeUntracked = false))
         assertEquals("-mardu", HgStatusParser.statusFlags(includeUntracked = true))

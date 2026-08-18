@@ -23,7 +23,7 @@ class StatusTextFormatterTest {
         val text = StatusTextFormatter.branchInfo(HgDisplayMode.BRANCH, current, base)
 
         assertEquals(
-            "Branch: feature (a1b2c3) \"Добавил фичу\" vs Parent: default (000111) \"Базовый коммит\"",
+            "Branch: feature (a1b2c3) \"Добавил фичу\" vs Branch point: default (000111) \"Базовый коммит\"",
             text
         )
     }

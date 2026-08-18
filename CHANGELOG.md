@@ -4,6 +4,41 @@
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-08-18
+### Fixed
+- **Branch modes list the branch's own files only — the same set Upsource shows.** Comparing against
+  the branching point is right, but everything the parent branch changed before being merged in also
+  differs from that point, and the list turned into 889 files and `+20585 −8168` where the review is
+  89 files and `+6816 −144`. The file set is now taken from the revisions of the branch itself
+  (`only(., max(ancestors(.) and branch(p1(first(branch(.))))))`) and the status output is filtered by
+  it. A merge revision contributes only the files edited while merging, so conflict resolutions stay
+  in the list and merely merged-in files stay out. `Branch changes vs parent HEAD` is filtered the
+  same way — it now answers "my files against the parent branch as it is now" instead of dumping
+  every change the parent has accumulated. An unrestricted comparison is still available through
+  `vs branch`.
+
+- **Double-clicking a directory no longer collapses and instantly re-expands it.** The tree column of
+  a `TreeTable` hands its mouse events to the tree itself, which already toggles the node on a double
+  click; the panel toggled it a second time. The panel's own toggle is kept for the other columns,
+  where the event never reaches the tree.
+
+### Changed
+- **Comparison modes say what they compare against.** `Entire Branch (vs Parent)` and
+  `Vs Parent Branch HEAD` differ only in the base revision — a fixed branch point against a parent
+  head that moves with every commit of a colleague — and neither title said so. They are now
+  `Branch changes (since branch point)` and `Branch changes vs parent HEAD`, each carrying a tooltip
+  (on the list item and on the combo itself) that explains what the mode answers and that the list
+  is limited to the branch's own files. The status line under the toolbar says `vs Branch point:`
+  instead of `vs Parent:` for the same reason.
+
+### Added
+- **Renames are shown as renames.** `hg status` is asked for copy sources (`--copies`), and the
+  removal of the old path plus the addition of the new one are folded into a single row marked `→`,
+  with the source file name next to it and the full old path in the tooltip. The diff compares the
+  file against its content under the old name in the base revision, so a moved file no longer reads
+  as a deletion plus a wholly new file. A copy whose source is still present stays an addition but
+  is diffed against the source too. Reverting a rename reverts the source path as well.
+
 ## [1.0.3] - 2026-08-07
 ### Added
 - **Landing on a file marks it reviewed.** Selecting a row is what counts as reviewing it, so a

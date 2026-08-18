@@ -1,5 +1,6 @@
 package com.narzaru.mercurial.changes
 
+import com.narzaru.mercurial.hg.HgStatusParser
 import com.narzaru.mercurial.model.HgFileItem
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.fileTypes.FileTypeManager
@@ -141,6 +142,12 @@ class ChangesNodeRenderer(
                         else -> SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES
                     }
                 )
+                // Откуда переименовали, видно прямо в строке: имя файла само по себе
+                // ничего об этом не говорит, а полный старый путь есть в тултипе.
+                if (item.copiedFrom.isNotEmpty() && !item.isTodoItem) {
+                    val from = item.copiedFrom.substringAfterLast('/')
+                    append("  ← $from", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                }
                 item.todoText?.let { append("  $it", SimpleTextAttributes.GRAYED_ATTRIBUTES) }
             }
         }
@@ -182,5 +189,7 @@ fun statusColor(status: String?): Color = when (status) {
     // `!` — то же удаление, что и `R`, только сделанное мимо hg: цвет общий.
     "R", "!" -> JBColor(Color(180, 70, 70), Color(220, 110, 110))
     "?" -> JBColor(Color(150, 70, 190), Color(190, 130, 220))
+    // Переименование — не добавление и не удаление, поэтому и цвет свой.
+    HgStatusParser.RENAMED_STATUS -> JBColor(Color(160, 110, 30), Color(210, 165, 80))
     else -> JBColor.GRAY
 }

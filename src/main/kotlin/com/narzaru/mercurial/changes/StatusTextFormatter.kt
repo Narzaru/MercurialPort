@@ -18,7 +18,8 @@ object StatusTextFormatter {
         val relation = when (mode) {
             HgDisplayMode.BASE_BRANCH_HEAD -> " vs Head of: "
             HgDisplayMode.CUSTOM_BRANCH -> " vs Branch: "
-            else -> " vs Parent: "
+            // Не просто «Parent»: у соседнего режима родитель тот же, а база другая.
+            else -> " vs Branch point: "
         }
         return "Branch: ${revision(currentInfo)}$relation${revision(baseInfo)}"
     }

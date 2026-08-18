@@ -59,6 +59,7 @@ import java.io.File
 import javax.swing.Icon
 import javax.swing.JComboBox
 import javax.swing.JComponent
+import javax.swing.JList
 import javax.swing.JPanel
 import javax.swing.JTable
 import javax.swing.KeyStroke
@@ -268,10 +269,22 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun buildModeRow(): JPanel {
         modeRow.border = JBUI.Borders.empty(0, 4, 2, 4)
-        modeCombo.renderer = SimpleListCellRenderer.create("") { it?.title ?: "" }
+        // Пояснение к режиму — тултипом: и у пунктов списка, и у самого поля, иначе разницу
+        // между двумя режимами ветки видно только по цифрам в готовом списке.
+        modeCombo.renderer = object : SimpleListCellRenderer<HgDisplayMode>() {
+            override fun customize(
+                list: JList<out HgDisplayMode>, value: HgDisplayMode?,
+                index: Int, selected: Boolean, hasFocus: Boolean
+            ) {
+                text = value?.title ?: ""
+                toolTipText = value?.hint
+            }
+        }
         modeCombo.selectedItem = displayMode
+        modeCombo.toolTipText = displayMode.hint
         modeCombo.addActionListener {
             val selected = modeCombo.selectedItem as? HgDisplayMode ?: return@addActionListener
+            modeCombo.toolTipText = selected.hint
             if (selected != displayMode) setDisplayMode(selected)
             updateBranchFieldVisibility()
         }
@@ -459,8 +472,14 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
         if (modelColumn != COL_TREE) return null
 
         val node = nodeAt(tree.rowAtPoint(event.point)) ?: return null
+        val payload = node.userObject
+        // Откуда переименован файл, по строке видно только по имени — полный старый путь
+        // показываем всегда, а не только когда текст не поместился.
+        if (payload is FileNode && payload.item.copiedFrom.isNotEmpty()) {
+            return "${payload.item.copiedFrom} → ${payload.item.path}"
+        }
         if (node !in truncatedNodes) return null
-        return when (val payload = node.userObject) {
+        return when (payload) {
             is DirNode -> payload.name
             is FileNode -> payload.item.path
             else -> null
@@ -491,7 +510,11 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         val payload = node.userObject
         if (payload is DirNode) {
-            if (e.clickCount == 2) toggleExpand(viewRow)
+            // По колонке дерева двойной клик раскрывает узел сам: TreeTable отдаёт события
+            // этой колонки самому дереву. Свой вызов сворачивал каталог и тут же разворачивал
+            // обратно. В остальных колонках событие до дерева не доходит — там разворачиваем мы.
+            val onTreeColumn = clickedColumn >= 0 && tree.convertColumnIndexToModel(clickedColumn) == COL_TREE
+            if (e.clickCount == 2 && !onTreeColumn) toggleExpand(viewRow)
             return
         }
         val item = (payload as? FileNode)?.item ?: return
@@ -723,7 +746,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
         var targetRev = "."
         when (mode) {
             HgDisplayMode.BASE_BRANCH_HEAD -> {
-                val r = runner.run("log", "-r", PARENT_BRANCH_REV, "--template", "{branch}")
+                val r = runner.run("log", "-r", BRANCH_START_REV, "--template", "{branch}")
                 if (r.success) {
                     targetRev = r.stdout.trim()
                     if (targetRev.isEmpty()) {
@@ -734,8 +757,16 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
                 }
             }
             HgDisplayMode.CUSTOM_BRANCH -> targetRev = customBranch
-            HgDisplayMode.BRANCH -> targetRev = PARENT_BRANCH_REV
+            HgDisplayMode.BRANCH -> targetRev = BRANCH_START_REV
             HgDisplayMode.UNCOMMITTED -> targetRev = "."
+        }
+
+        // Режимы ветки ограничены файлами, которых касались её собственные ревизии: иначе
+        // влитый родитель приходит в список как своя работа. Прочие режимы сравнивают всё.
+        val scope = if (mode == HgDisplayMode.BRANCH || mode == HgDisplayMode.BASE_BRANCH_HEAD) {
+            branchOwnFiles(runner)
+        } else {
+            null
         }
 
         val template = StatusTextFormatter.REVISION_TEMPLATE
@@ -744,22 +775,51 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
         val baseInfo = runner.run("log", "-r", targetRev, "--template", template)
             .stdout.ifBlank { StatusTextFormatter.UNKNOWN_REVISION }
 
-        val statusRes = runner.run("status", "--rev", targetRev, HgStatusParser.statusFlags(untracked))
+        val statusRes = runner.run(
+            "status", "--rev", targetRev,
+            HgStatusParser.statusFlags(untracked), HgStatusParser.COPIES_FLAG
+        )
         if (!statusRes.success) {
             return ChangesResult(emptyList(), targetRev, "", statusError(mode, statusRes.stderr))
         }
 
         // Статусы показываем сразу, а +/- догружает loadDiffStats — дифф ветки слишком долгий.
-        val files = HgStatusParser.parse(statusRes.stdout)
+        val all = HgStatusParser.foldRenames(HgStatusParser.parse(statusRes.stdout))
+        val files = if (scope == null) all else all.filter { inScope(it, scope) }
         return ChangesResult(files, targetRev, StatusTextFormatter.branchInfo(mode, currentInfo, baseInfo), null)
+    }
+
+    private fun inScope(item: HgFileItem, scope: Set<String>): Boolean =
+        HgPaths.key(item.path) in scope || (item.copiedFrom.isNotEmpty() && HgPaths.key(item.copiedFrom) in scope)
+
+    /**
+     * Файлы, которых касались собственные ревизии ветки, — то же множество, что показывает
+     * Upsource для ревью «первая ревизия ветки … текущая». У ревизии слияния `{files}` содержит
+     * только то, что правилось при слиянии, поэтому разрешение конфликтов в список попадает,
+     * а просто влитые из родителя файлы — нет.
+     *
+     * `null` — множество получить не удалось (корневая ветка, ошибка hg): тогда список не
+     * ограничиваем, это лучше пустого окна.
+     */
+    private fun branchOwnFiles(runner: HgCommandRunner): Set<String>? {
+        val r = runner.run("log", "-r", BRANCH_REVS, "--template", "{join(files, '\\n')}\\n")
+        if (!r.success) return null
+        val files = r.stdout.split('\r', '\n')
+            .mapNotNull { it.trim().ifEmpty { null } }
+            .map { HgPaths.key(it) }
+            .toSet()
+        return files.ifEmpty { null }
     }
 
     /** У корневой ветки родителя нет, и `hg status --rev` падает — подсказываем рабочий режим. */
     private fun statusError(mode: HgDisplayMode, stderr: String): String {
         val rootBranch = (mode == HgDisplayMode.BRANCH || mode == HgDisplayMode.BASE_BRANCH_HEAD) &&
-            (stderr.contains("revision 0") || stderr.contains("unknown revision"))
+            // «empty revision range» — ответ нового revset на ветке без родителя.
+            (stderr.contains("revision 0") || stderr.contains("unknown revision") ||
+                stderr.contains("empty revision"))
         return if (rootBranch) {
-            "ROOT BRANCH DETECTED (No Parent). Use 'Uncommitted Only'.\nDetails: " + stderr.trim()
+            "ROOT BRANCH DETECTED (No Parent). Use '${HgDisplayMode.UNCOMMITTED.title}'.\nDetails: " +
+                stderr.trim()
         } else {
             "HG Error: " + stderr.trim()
         }
@@ -899,7 +959,8 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun diffFile(item: HgFileItem) {
         val repoRoot = currentRepoRoot ?: return
         val localFile = File(repoRoot, item.path)
-        val isNew = item.status == "A" || item.status == "?"
+        // У переименования и копии базовая сторона есть — она лежит под старым именем.
+        val isNew = (item.status == "A" || item.status == "?") && item.copiedFrom.isEmpty()
         val hasBaseRev = currentBaseRev.isNotEmpty() && currentBaseRev != "null"
         // Устаревший ответ не должен перекрыть свежий, даже если сами мы ничего не ждём.
         val requestId = ++diffRequestId
@@ -911,7 +972,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
 
         // Уже читали это содержимое — показываем сразу, без запуска hg и без мигания вкладки.
-        val key = HgContentCache.key(currentBaseRev, item.path)
+        val key = HgContentCache.key(currentBaseRev, item.basePath)
         baseContentCache.get(key)?.let {
             showDiff(item, localFile, it.text)
             return
@@ -919,7 +980,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         val baseRev = currentBaseRev
         ApplicationManager.getApplication().executeOnPooledThread {
-            val base = readBase(repoRoot, baseRev, item.path)
+            val base = readBase(repoRoot, baseRev, item.basePath)
             onEdt {
                 if (requestId != diffRequestId) return@onEdt // пришёл более свежий клик
                 showDiff(item, localFile, base)
@@ -950,8 +1011,8 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
             .map { row + it }
             .filter { it >= 0 }
             .mapNotNull { (nodeAt(it)?.userObject as? FileNode)?.item }
-            .filter { !it.isTodoItem && it.status != "A" && it.status != "?" }
-            .map { it.path }
+            .filter { !it.isTodoItem && (it.copiedFrom.isNotEmpty() || (it.status != "A" && it.status != "?")) }
+            .map { it.basePath }
         if (paths.isEmpty()) return
 
         val requestId = ++prefetchId
@@ -976,7 +1037,10 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         val baseContent = if (base != null) factory.create(project, base, fileType) else factory.createEmpty()
         val localContent = if (vf != null) factory.create(project, vf) else factory.createEmpty()
-        val baseTitle = if (base != null) "Hg Base ($currentBaseRev)" else "Not in base"
+        // У переименования в заголовке базовой стороны — старый путь: иначе по вкладке
+        // не понять, с чем именно сравнивают.
+        val baseName = if (item.copiedFrom.isNotEmpty()) " ${item.copiedFrom}" else ""
+        val baseTitle = if (base != null) "Hg Base ($currentBaseRev)$baseName" else "Not in base"
         val localTitle = if (vf != null) "Local Version" else "Deleted locally"
 
         val name = localFile.name
@@ -1006,10 +1070,14 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
             if (mode != HgDisplayMode.UNCOMMITTED) {
                 args.add("-r"); args.add(baseRev)
             }
-            selected.forEach { args.add(it.path) }
+            // Переименование откатываем вместе с источником: иначе старый путь останется
+            // удалённым, а восстановится только новое имя.
+            selected.forEach { args.add(it.path); if (it.copiedFrom.isNotEmpty()) args.add(it.copiedFrom) }
             val result = runner.run(args)
 
-            val ioFiles = selected.map { File(repoRoot, it.path) }
+            val ioFiles = selected.flatMap { item ->
+                listOfNotNull(File(repoRoot, item.path), item.copiedFrom.takeIf { it.isNotEmpty() }?.let { File(repoRoot, it) })
+            }
             onEdt {
                 LocalFileSystem.getInstance().refreshIoFiles(ioFiles)
                 setBusy(false)
@@ -1050,8 +1118,26 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private companion object {
-        /** Ревизия-родитель текущей ветки: последний общий коммит с той, от которой её ответвили. */
-        const val PARENT_BRANCH_REV = "p1(first(branch(.)))"
+        /**
+         * Точка ответвления: база режима «вся ветка» и ревизия, по которой определяется имя
+         * родительской ветки. Ровно эту базу берёт Upsource для ревью «первая ревизия ветки …
+         * текущая»: у первой ревизии ветки это и есть первый родитель.
+         */
+        const val BRANCH_START_REV = "p1(first(branch(.)))"
+
+        /**
+         * Последний предок текущей ревизии, лежащий на родительской ветке. Сам по себе базой
+         * не служит, но отделяет собственные ревизии ветки от влитых: после слияния родителя
+         * в ветку его ревизии тоже становятся её предками.
+         */
+        const val MERGE_BASE_REV = "max(ancestors(.) and branch($BRANCH_START_REV))"
+
+        /**
+         * Собственные ревизии ветки — предки текущей, не являющиеся предками точки слияния.
+         * Их файлами ограничивается список: сравнение с точкой ответвления иначе тащит в него
+         * всё, что родительская ветка успела наменять до слияния (889 файлов вместо 89).
+         */
+        const val BRANCH_REVS = "only(., $MERGE_BASE_REV)"
 
         /** Псевдостатус файла, который числится изменённым, но по диффу отличий не имеет. */
         const val UNCHANGED_STATUS = "♦"
