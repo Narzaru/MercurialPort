@@ -3,13 +3,49 @@
 # Mercurial Port Changelog
 
 ## [Unreleased]
+
+## [1.0.5] - 2026-08-19
+### Removed
+- **`Branch changes vs parent HEAD` is gone.** Comparing the branch's own files against the parent's
+  current head shows other people's edits to those files inverted — as if the branch deleted their
+  work — and the question it answered ("what will I bring into the parent") is answered honestly by
+  a merge or a rebase, not by a diff. Review is done from the branching point anyway.
+
+### Fixed
+- **The mode combo now reaches the right edge**, in line with the `Filter`/`Exclude` fields under it.
+  The holder of the branch field stayed in the row when the field itself was hidden, and an empty
+  `FlowLayout` still takes its own padding — the combo ended ~10 px short in every mode but
+  `VS branch`.
+
 ### Changed
-- README describes the comparison modes as they are now: their current titles, the fixed branch
-  point against the moving parent HEAD, and the fact that both branch modes list the branch's own
-  files only. Renames, the `Show ± Column` toggle and the real summary line were missing from it
-  as well. The same mode wording went into the plugin description.
-- Documentation and comments no longer present the plugin as a port of the Visual Studio
-  extension: the two have diverged far enough that the references only misled.
+- **Comparison modes are named after their base**: `Uncommitted`, `Base`, `VS branch`. `Branch
+  changes (since branch point)` said in five words what `Base` says in one, and with the middle mode
+  gone the prefix "Branch changes" distinguished nothing. The tooltips still carry the details.
+- **Review marks are dots, not eyes**: a 12 px outlined circle for a file still to look at, a filled
+  one for a reviewed file (and for a directory whose files are all reviewed). An eye said "look",
+  which is what the row itself does — the column is about the mark.
+- **`Show Untracked` is a crossed-out eye** instead of the "ignored file" icon it borrowed from VCS.
+  The platform has no slashed eye, so it is drawn over `General.Show`.
+- **`Clear Reviewed` moved from the toolbar into the ⋮ menu**, at the top and separated from the
+  panel's toggles. Next to `Refresh` and `Undo Changes` it was a third curved arrow, and a command
+  that drops the whole review sat one misclick away from the button that reloads the list.
+- **The user interface is in English**, all of it: toolbar and gear items, the comparison-mode
+  tooltips, the revert confirmation, export dialogs, status texts and the settings page. CLAUDE.md
+  now states the rule — identifiers, comments, UI strings and the changelog are English; comments
+  written before the rule are translated as their files are touched.
+- **Hg File History shows the day, not the timestamp.** `{date|isodate}` carries the time and the
+  UTC offset, which took half the column's width and told revisions apart about never; the full
+  value is now a tooltip on the cell and the column is narrow (`Rev` is untouched).
+- **README describes what the plugin does**, not how it does it, and follows a fixed structure: what
+  the plugin is, the features that matter, requirements, installation, licence. The comparison modes
+  are listed by the question each answers; revsets, cache sizes, settings keys and class names are
+  gone, and so are the build instructions (they live in CLAUDE.md). Behaviour changed in 1.0.4 is
+  reflected — branch modes list the branch's own files only and renames are a single row — selecting
+  two revisions in Hg File History is spelled out as a Ctrl/Shift click, and reverting files, which
+  the rewrite had reduced to one word in a list, is described again.
+- The plugin is documented on its own terms: where the code came from is no longer mentioned in the
+  README, CLAUDE.md, the plugin description or the class comments, since the two have diverged far
+  enough that the comparison only misleads. Released changelog entries keep their wording.
 
 ## [1.0.4] - 2026-08-18
 ### Fixed

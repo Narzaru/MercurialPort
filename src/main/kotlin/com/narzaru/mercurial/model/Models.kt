@@ -3,30 +3,26 @@ package com.narzaru.mercurial.model
 import java.io.File
 
 /**
- * Режимы сравнения в главном окне. Название говорит, с чем сравнивают, [hint] — зачем это
- * нужно и чем режим отличается от соседнего: по одному заголовку разница между двумя
- * режимами ветки (неподвижная база против вершины родителя) не читалась.
+ * Comparison modes of the main tool window. The title says what is compared against, [hint]
+ * says why the mode exists and how it differs from its neighbour: the titles alone did not
+ * convey the difference between the two branch modes (a fixed base against the parent's head).
  */
 enum class HgDisplayMode(val title: String, val hint: String) {
     UNCOMMITTED(
-        "Uncommitted changes",
-        "Незакоммиченные правки рабочего каталога."
+        "Uncommitted",
+        "Uncommitted edits in the working directory."
     ),
     BRANCH(
-        "Branch changes (since branch point)",
-        "Что сделано в ветке: сравнение с ревизией, от которой её ответвили. База неподвижна, " +
-            "что бы ни коммитили в родительскую ветку, — это режим ревью, тот же дифф показывает " +
-            "Upsource. В списке только файлы, которых касались ревизии самой ветки."
-    ),
-    BASE_BRANCH_HEAD(
-        "Branch changes vs parent HEAD",
-        "Те же файлы ветки, но сравнение с текущей вершиной родительской ветки. База уезжает " +
-            "вперёд с каждым коммитом коллег: видно, что ветка принесёт в родителя и где разошлась " +
-            "с чужими правками."
+        "Base",
+        "What the branch itself has done: compared against the revision it was branched off. The " +
+            "base does not move, so commits other people make in the parent branch do not affect the " +
+            "list — this is the review mode, the same diff Upsource shows. Only files touched by the " +
+            "branch's own revisions are listed."
     ),
     CUSTOM_BRANCH(
-        "vs branch",
-        "Сравнение с указанной веткой целиком, без ограничения по файлам ветки."
+        "VS branch",
+        "Compared against the branch named in the field on the right, as a whole: the file list is " +
+            "not restricted to the branch's own files."
     )
 }
 

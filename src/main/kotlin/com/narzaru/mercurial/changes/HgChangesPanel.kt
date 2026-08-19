@@ -128,6 +128,12 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
     private val modeRow = JPanel(BorderLayout(4, 0))
 
     /**
+     * Holder of [branchField]. Hidden as a whole outside `VS branch`: hiding just the field leaves
+     * the holder's own padding on the right, and the mode combo ends short of the fields below it.
+     */
+    private val branchHolder = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
+
+    /**
      * Узлы, текст которых рендерер обрезал многоточием, — только для них показываем тултип.
      * Ключи слабые: дерево пересобирается целиком на каждый renderFiltered().
      */
@@ -138,7 +144,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
     // к моменту настройки колонок ещё не проинициализировано (`by lazy` не спасает —
     // делегат тоже поле и инициализируется по порядку объявления).
     private val statsRenderer: TableCellRenderer = StatsCellRenderer { nodeAt(it) }
-    private val eyeRenderer: TableCellRenderer = EyeCellRenderer({ nodeAt(it) }, ::allReviewed)
+    private val eyeRenderer: TableCellRenderer = ReviewCellRenderer({ nodeAt(it) }, ::allReviewed)
 
     /**
      * Снимает блокировку активации строк. Объявлено до дерева: TreeTable трогает выделение
@@ -245,20 +251,19 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun buildToolbar(): JComponent {
         val group = DefaultActionGroup()
-        group.add(action("Refresh", "Перечитать изменения", AllIcons.Actions.Refresh) { refresh() })
-        group.add(action("Undo Changes", "Откатить выбранные файлы", AllIcons.Actions.Rollback) { revertSelected() })
-        group.add(action("Clear Reviewed", "Снять все отметки просмотра", AllIcons.General.Reset) { clearReviewed() })
+        group.add(action("Refresh", "Reload the changes", AllIcons.Actions.Refresh) { refresh() })
+        group.add(action("Undo Changes", "Revert the selected files", AllIcons.Actions.Rollback) { revertSelected() })
         group.add(Separator.getInstance())
-        group.add(toggle("Files", "Список файлов", AllIcons.Actions.ListFiles,
+        group.add(toggle("Files", "List of files", AllIcons.Actions.ListFiles,
             { listMode == HgListMode.FILES }) { setListMode(HgListMode.FILES) })
-        group.add(toggle("TODO", "TODO-комментарии в изменённых файлах", AllIcons.General.TodoDefault,
+        group.add(toggle("TODO", "TODO comments in the changed files", AllIcons.General.TodoDefault,
             { listMode == HgListMode.TODO }) { setListMode(HgListMode.TODO) })
         group.add(Separator.getInstance())
-        group.add(toggle("Show Untracked", "Показывать неотслеживаемые файлы (?)", AllIcons.Vcs.Ignore_file,
+        group.add(toggle("Show Untracked", "Show untracked files (?)", HgIcons.EYE_CROSSED,
             { showUntracked }) { showUntracked = !showUntracked; refresh() })
-        group.add(toggle("Show Unchanged", "Показывать файлы без реальных изменений (♦)", AllIcons.Vcs.Equal,
+        group.add(toggle("Show Unchanged", "Show files with no real changes (♦)", AllIcons.Vcs.Equal,
             { showUnchanged }) { setShowUnchanged(!showUnchanged) })
-        group.add(toggle("Filter", "Показать поля Filter/Exclude", AllIcons.General.Filter,
+        group.add(toggle("Filter", "Show the Filter/Exclude fields", AllIcons.General.Filter,
             { filtersVisible }) { setFiltersVisible(!filtersVisible) })
 
         val toolbar = ActionManager.getInstance().createActionToolbar("HgChanges", group, true)
@@ -290,7 +295,6 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
         modeRow.add(modeCombo, BorderLayout.CENTER)
 
-        val branchHolder = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
         branchHolder.add(branchField)
         modeRow.add(branchHolder, BorderLayout.EAST)
         branchField.document.addDocumentListener(object : DocumentAdapter() {
@@ -434,13 +438,17 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
         if (toolWindow !is ToolWindowEx) return
         toolWindow.setAdditionalGearActions(
             DefaultActionGroup(
-                toggle("Show ± Column", "Показывать колонку добавленных/удалённых строк", null,
+                // Сброс отметок — команда, а не переключатель, и делает он много: держим его
+                // отдельной группой сверху, чтобы не нажимался заодно с настройками панели.
+                action("Clear Reviewed", "Drop every review mark", null) { clearReviewed() },
+                Separator.getInstance(),
+                toggle("Show ± Column", "Show the added/removed lines column", null,
                     { statsVisible }) { setStatsVisible(!statsVisible) },
-                toggle("Mark Reviewed on Open", "Ставить отметку просмотра при открытии файла", null,
+                toggle("Mark Reviewed on Open", "Mark a file reviewed when it is opened", null,
                     { settings.markReviewedOnOpen }) {
                     settings.markReviewedOnOpen = !settings.markReviewedOnOpen
                 },
-                action("Encoding Settings…", "Кодировка сообщений коммитов и вывода hg", null) {
+                action("Encoding Settings…", "Encoding of commit messages and hg output", null) {
                     ShowSettingsUtil.getInstance().showSettingsDialog(project, HgSettingsConfigurable::class.java)
                     refresh()
                 }
@@ -468,7 +476,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
         val viewColumn = tree.columnAtPoint(event.point)
         if (viewColumn < 0) return null
         val modelColumn = tree.convertColumnIndexToModel(viewColumn)
-        if (modelColumn == COL_EYE) return EyeCellRenderer.TOOLTIP
+        if (modelColumn == COL_EYE) return ReviewCellRenderer.TOOLTIP
         if (modelColumn != COL_TREE) return null
 
         val node = nodeAt(tree.rowAtPoint(event.point)) ?: return null
@@ -591,7 +599,9 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun updateBranchFieldVisibility() {
-        branchField.isVisible = displayMode == HgDisplayMode.CUSTOM_BRANCH
+        val custom = displayMode == HgDisplayMode.CUSTOM_BRANCH
+        branchField.isVisible = custom
+        branchHolder.isVisible = custom
         modeRow.revalidate()
         modeRow.repaint()
     }
@@ -743,31 +753,15 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
         customBranch: String,
         untracked: Boolean
     ): ChangesResult {
-        var targetRev = "."
-        when (mode) {
-            HgDisplayMode.BASE_BRANCH_HEAD -> {
-                val r = runner.run("log", "-r", BRANCH_START_REV, "--template", "{branch}")
-                if (r.success) {
-                    targetRev = r.stdout.trim()
-                    if (targetRev.isEmpty()) {
-                        return ChangesResult(emptyList(), ".", "", "Could not determine base branch name.")
-                    }
-                } else {
-                    return ChangesResult(emptyList(), ".", "", "Root branch or error: " + r.stderr.trim())
-                }
-            }
-            HgDisplayMode.CUSTOM_BRANCH -> targetRev = customBranch
-            HgDisplayMode.BRANCH -> targetRev = BRANCH_START_REV
-            HgDisplayMode.UNCOMMITTED -> targetRev = "."
+        val targetRev = when (mode) {
+            HgDisplayMode.CUSTOM_BRANCH -> customBranch
+            HgDisplayMode.BRANCH -> BRANCH_START_REV
+            HgDisplayMode.UNCOMMITTED -> "."
         }
 
-        // Режимы ветки ограничены файлами, которых касались её собственные ревизии: иначе
-        // влитый родитель приходит в список как своя работа. Прочие режимы сравнивают всё.
-        val scope = if (mode == HgDisplayMode.BRANCH || mode == HgDisplayMode.BASE_BRANCH_HEAD) {
-            branchOwnFiles(runner)
-        } else {
-            null
-        }
+        // The branch mode is limited to the files its own revisions touched: otherwise a parent
+        // merged into the branch shows up as the branch's own work. `VS` compares everything.
+        val scope = if (mode == HgDisplayMode.BRANCH) branchOwnFiles(runner) else null
 
         val template = StatusTextFormatter.REVISION_TEMPLATE
         val currentInfo = runner.run("log", "-r", ".", "--template", template)
@@ -811,10 +805,10 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
         return files.ifEmpty { null }
     }
 
-    /** У корневой ветки родителя нет, и `hg status --rev` падает — подсказываем рабочий режим. */
+    /** A root branch has no parent and `hg status --rev` fails — point at a mode that works. */
     private fun statusError(mode: HgDisplayMode, stderr: String): String {
-        val rootBranch = (mode == HgDisplayMode.BRANCH || mode == HgDisplayMode.BASE_BRANCH_HEAD) &&
-            // «empty revision range» — ответ нового revset на ветке без родителя.
+        val rootBranch = mode == HgDisplayMode.BRANCH &&
+            // "empty revision range" is what the revset answers on a branch without a parent.
             (stderr.contains("revision 0") || stderr.contains("unknown revision") ||
                 stderr.contains("empty revision"))
         return if (rootBranch) {
@@ -1082,7 +1076,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
                 LocalFileSystem.getInstance().refreshIoFiles(ioFiles)
                 setBusy(false)
                 if (!result.success && result.stderr.isNotBlank()) {
-                    Messages.showErrorDialog(project, "Ошибка при откате: ${result.stderr}", "Ошибка")
+                    Messages.showErrorDialog(project, "Revert failed: ${result.stderr}", "Error")
                 } else {
                     refresh()
                 }
@@ -1093,19 +1087,19 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun confirmRevert(selected: List<HgFileItem>): Boolean {
         val message = buildString {
             if (displayMode == HgDisplayMode.UNCOMMITTED) {
-                appendLine("Откатить незакоммиченные изменения (revert) для ${selected.size} файлов?")
+                appendLine("Revert uncommitted changes in ${selected.size} file(s)?")
             } else {
-                appendLine("Вернуть ${selected.size} файлов к базовой ревизии ($currentBaseRev)?")
-                appendLine("Все изменения с этого момента (включая незакоммиченные) будут потеряны.")
+                appendLine("Restore ${selected.size} file(s) to the base revision ($currentBaseRev)?")
+                appendLine("Every change made since then, committed or not, will be lost.")
             }
             appendLine()
             selected.take(REVERT_PREVIEW_LIMIT).forEach { appendLine(it.path) }
             if (selected.size > REVERT_PREVIEW_LIMIT) {
-                appendLine("... и ещё ${selected.size - REVERT_PREVIEW_LIMIT} файлов")
+                appendLine("... and ${selected.size - REVERT_PREVIEW_LIMIT} more")
             }
         }
         return Messages.showYesNoDialog(
-            project, message, "Подтверждение отката", Messages.getWarningIcon()
+            project, message, "Confirm revert", Messages.getWarningIcon()
         ) == Messages.YES
     }
 

@@ -4,7 +4,6 @@ import com.narzaru.mercurial.hg.HgStatusParser
 import com.narzaru.mercurial.model.HgFileItem
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.fileTypes.FileTypeManager
-import com.intellij.openapi.util.IconLoader
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.JBColor
 import com.intellij.ui.SimpleColoredComponent
@@ -13,7 +12,6 @@ import com.intellij.ui.components.JBLabel
 import java.awt.BorderLayout
 import java.awt.Color
 import javax.swing.BorderFactory
-import javax.swing.Icon
 import javax.swing.JPanel
 import javax.swing.JTree
 import javax.swing.SwingConstants
@@ -65,8 +63,8 @@ class StatsCellRenderer(private val nodeAt: (Int) -> DefaultMutableTreeNode?) : 
     }
 }
 
-/** Колонка отметки просмотра: у каталога «глаз» горит, только когда просмотрено всё внутри. */
-class EyeCellRenderer(
+/** Колонка отметки просмотра: у каталога точка залита, только когда просмотрено всё внутри. */
+class ReviewCellRenderer(
     private val nodeAt: (Int) -> DefaultMutableTreeNode?,
     private val allReviewed: (DefaultMutableTreeNode) -> Boolean
 ) : TableCellRenderer {
@@ -86,16 +84,14 @@ class EyeCellRenderer(
         val node = nodeAt(row)
         label.icon = when {
             node == null -> null
-            allReviewed(node) -> EYE_ICON
-            else -> EYE_ICON_FADED
+            allReviewed(node) -> HgIcons.DOT_FILLED
+            else -> HgIcons.DOT_EMPTY
         }
         return label
     }
 
     companion object {
-        const val TOOLTIP = "Отметить просмотренным (клик или Space)"
-        private val EYE_ICON: Icon = AllIcons.Actions.Show
-        private val EYE_ICON_FADED: Icon = IconLoader.getTransparentIcon(AllIcons.Actions.Show, 0.25f)
+        const val TOOLTIP = "Mark as reviewed (click or Space)"
     }
 }
 

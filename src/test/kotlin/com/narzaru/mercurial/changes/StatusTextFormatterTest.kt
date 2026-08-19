@@ -31,8 +31,8 @@ class StatusTextFormatterTest {
     @Test
     fun `режим задаёт формулировку сравнения`() {
         assertTrue(
-            StatusTextFormatter.branchInfo(HgDisplayMode.BASE_BRANCH_HEAD, current, base)
-                .contains(" vs Head of: ")
+            StatusTextFormatter.branchInfo(HgDisplayMode.BRANCH, current, base)
+                .contains(" vs Branch point: ")
         )
         assertTrue(
             StatusTextFormatter.branchInfo(HgDisplayMode.CUSTOM_BRANCH, current, base)
@@ -72,7 +72,7 @@ class StatusTextFormatterTest {
 
         val text = StatusTextFormatter.summary(files, reviewed = 0, statsPending = true)
 
-        assertTrue(text.contains("считаю ±"))
+        assertTrue(text.contains("counting ±"))
         assertTrue(text.startsWith("1 files"))
     }
 

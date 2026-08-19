@@ -35,15 +35,18 @@ import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
+import java.awt.Component
 import java.io.File
 import javax.swing.BoxLayout
 import javax.swing.Icon
 import javax.swing.JComponent
 import javax.swing.JPanel
+import javax.swing.JTable
 import javax.swing.ListSelectionModel
 import javax.swing.SwingConstants
 import javax.swing.event.MouseInputAdapter
 import javax.swing.table.AbstractTableModel
+import javax.swing.table.DefaultTableCellRenderer
 
 /**
  * Окно истории файла: `hg log -f`, открытие ревизии, дифф выбранных ревизий.
@@ -152,20 +155,46 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
                 if (e.clickCount == 1) diffSelected()
             }
         })
+        configureDateColumn()
         add(JBScrollPane(table), BorderLayout.CENTER)
+    }
+
+    /**
+     * Дата: в колонке — только день, время и часовой пояс уходят в тултип. Колонка от этого
+     * заметно уже, а место нужно колонке сообщения.
+     */
+    private fun configureDateColumn() {
+        val column = table.columnModel.getColumn(HistoryTableModel.COL_DATE)
+        column.cellRenderer = object : DefaultTableCellRenderer() {
+            override fun getTableCellRendererComponent(
+                table: JTable, value: Any?, isSelected: Boolean,
+                hasFocus: Boolean, row: Int, column: Int
+            ): Component {
+                val raw = value?.toString().orEmpty()
+                super.getTableCellRendererComponent(
+                    table, HistoryDateText.day(raw), isSelected, hasFocus, row, column
+                )
+                // JTable спрашивает подсказку у компонента, отрисовавшего ячейку под курсором,
+                // так что переиспользуемый рендерер здесь безопасен.
+                toolTipText = HistoryDateText.full(raw)
+                return this
+            }
+        }
+        column.preferredWidth = JBUI.scale(DATE_COLUMN_WIDTH)
+        column.maxWidth = JBUI.scale(DATE_COLUMN_MAX_WIDTH)
     }
 
     /** Тулбар в стиле Hg Changes: компактные иконки вместо ряда подписанных кнопок. */
     private fun buildToolbar(): JComponent {
         val group = DefaultActionGroup()
-        group.add(action("Refresh", "Перечитать историю файла", AllIcons.Actions.Refresh,
+        group.add(action("Refresh", "Reload the file history", AllIcons.Actions.Refresh,
             { targetFile != null }) { reload() })
         group.add(Separator.getInstance())
         // Дифф по одинарному клику — основной путь (контракт UI), но выделить две ревизии
         // можно и с клавиатуры (Shift+стрелки), поэтому действие оставлено и в тулбаре.
-        group.add(action("Show Diff", "Показать дифф выбранной ревизии (или двух между собой)",
+        group.add(action("Show Diff", "Diff the selected revision (or two revisions against each other)",
             AllIcons.Actions.Diff, { table.selectedRowCount in 1..2 }) { diffSelected() })
-        group.add(action("Open", "Открыть выбранную ревизию файла во временной копии",
+        group.add(action("Open", "Open the selected revision of the file as a temporary copy",
             AllIcons.Actions.OpenNewTab, { table.selectedRowCount > 0 }) { openSelected() })
 
         val toolbar = ActionManager.getInstance().createActionToolbar("HgFileHistory", group, true)
@@ -266,7 +295,7 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         val selected = selectedItems()
         if (selected.isEmpty()) return
         if (selected.size > 2) {
-            Messages.showWarningDialog(project, "Выберите 1 или 2 ревизии для сравнения.", "Hg Diff")
+            Messages.showWarningDialog(project, "Select one or two revisions to compare.", "Hg Diff")
             return
         }
 
@@ -312,7 +341,7 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
                 try {
                     showDiff(file, fileType, leftContent, rightContent, leftLabel, rightLabel, key)
                 } catch (e: Exception) {
-                    LOG.warn("Не удалось открыть дифф ($key)", e)
+                    LOG.warn("Could not open the diff ($key)", e)
                     statusLabel.text = "Diff error: ${e.message ?: e.javaClass.simpleName}"
                 }
             }
@@ -329,7 +358,7 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         val factory = DiffContentFactory.getInstance()
         val hasRight = rightContent != null
         if (leftContent == null && !hasRight) {
-            statusLabel.text = lastCatError?.let { "Hg Error: $it" } ?: "Нечего сравнивать для этой ревизии."
+            statusLabel.text = lastCatError?.let { "Hg Error: $it" } ?: "Nothing to compare for this revision."
             return
         }
 
@@ -392,6 +421,11 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
 
     private companion object {
         const val TOOL_WINDOW_ID = "Hg File History"
+
+        /** Ширины колонки даты: в ней остался только день. */
+        const val DATE_COLUMN_WIDTH = 80
+        const val DATE_COLUMN_MAX_WIDTH = 110
+
         val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(HgFileHistoryPanel::class.java)
     }
 
@@ -402,6 +436,10 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         fun setItems(items: List<HgHistoryItem>) {
             rows = items
             fireTableDataChanged()
+        }
+
+        companion object {
+            const val COL_DATE = 2
         }
 
         fun itemAt(row: Int): HgHistoryItem? = rows.getOrNull(row)

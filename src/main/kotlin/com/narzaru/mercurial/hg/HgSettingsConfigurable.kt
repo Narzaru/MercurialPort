@@ -14,7 +14,7 @@ class HgSettingsConfigurable : Configurable {
         isEditable = true // можно вписать любую поддерживаемую кодировку
     }
 
-    private val sharedTabCheck = JCheckBox("Показывать дифф Hg Changes и Hg File History в одной вкладке")
+    private val sharedTabCheck = JCheckBox("Show Hg Changes and Hg File History diffs in one tab")
 
     override fun getDisplayName() = "Mercurial Port"
 
@@ -25,18 +25,18 @@ class HgSettingsConfigurable : Configurable {
     override fun createComponent(): JComponent = panel {
         row {
             text(
-                "Вывод <code>hg</code> сначала читается как UTF-8. Если строка не является корректным " +
-                    "UTF-8 (обычно так и бывает с сообщениями коммитов, набранными в системной кодировке), " +
-                    "она декодируется указанной ниже кодировкой."
+                "Output of <code>hg</code> is read as UTF-8 first. A line that is not valid UTF-8 — " +
+                    "which is what commit messages typed in the system codepage look like — is decoded " +
+                    "with the encoding below."
             )
         }
-        row("Кодировка коммитов и вывода hg:") {
+        row("Encoding of commit messages and hg output:") {
             cell(encodingCombo)
-                .comment("Кодировка системы: <b>${HgSettings.systemDefault}</b>")
+                .comment("System encoding: <b>${HgSettings.systemDefault}</b>")
         }
         row {
             cell(sharedTabCheck)
-                .comment("Если снять, у каждого окна будет своя (одна) дифф-вкладка")
+                .comment("Clear this and each tool window keeps a diff tab of its own (still one per window)")
         }
     }
 
@@ -50,7 +50,7 @@ class HgSettingsConfigurable : Configurable {
         val encoding = selectedEncoding()
         if (encoding.isEmpty()) return
         if (!runCatching { Charset.isSupported(encoding) }.getOrDefault(false)) {
-            throw com.intellij.openapi.options.ConfigurationException("Неизвестная кодировка: $encoding")
+            throw com.intellij.openapi.options.ConfigurationException("Unknown encoding: $encoding")
         }
         HgSettings.fallbackEncoding = encoding
     }

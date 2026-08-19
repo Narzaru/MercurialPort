@@ -31,8 +31,8 @@ class ExportToTotalCommanderAction : DumbAwareAction() {
         } catch (ex: Exception) {
             Messages.showWarningDialog(
                 project,
-                "Дамп создан в $dumpPath, но не удалось запустить Total Commander: ${ex.message}",
-                "Предупреждение"
+                "The dump was created in $dumpPath, but Total Commander could not be started: ${ex.message}",
+                "Warning"
             )
         }
     }

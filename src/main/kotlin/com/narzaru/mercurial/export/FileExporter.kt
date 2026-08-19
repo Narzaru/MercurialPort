@@ -24,7 +24,7 @@ object FileExporter {
     fun dumpOpenFiles(project: Project, forceChooseDir: Boolean): String? {
         val projectRoot = project.basePath?.let { File(it) }
         if (projectRoot == null) {
-            Messages.showWarningDialog(project, "Проект не открыт.", "Экспорт")
+            Messages.showWarningDialog(project, "No project is open.", "Export")
             return null
         }
 
@@ -57,8 +57,8 @@ object FileExporter {
 
         Messages.showInfoMessage(
             project,
-            "Скопировано файлов: $count\nПуть: ${sessionDir.absolutePath}",
-            "Экспорт завершён"
+            "Files copied: $count\nPath: ${sessionDir.absolutePath}",
+            "Export finished"
         )
         return sessionDir.absolutePath
     }
@@ -72,7 +72,7 @@ object FileExporter {
         }
 
         val descriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor()
-            .withTitle("Выберите базовую папку для копирования файлов")
+            .withTitle("Choose the base folder to copy the files into")
         val toSelect = stored.takeIf { it.isNotEmpty() }
             ?.let { LocalFileSystem.getInstance().findFileByPath(it) }
         val chosen = FileChooser.chooseFile(descriptor, project, toSelect) ?: return null
