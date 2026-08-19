@@ -9,7 +9,6 @@ import java.io.File
 
 /**
  * Экспортирует открытые файлы и открывает папку дампа в Total Commander.
- * Порт TotalCmdDumpCommand.
  */
 class ExportToTotalCommanderAction : DumbAwareAction() {
 

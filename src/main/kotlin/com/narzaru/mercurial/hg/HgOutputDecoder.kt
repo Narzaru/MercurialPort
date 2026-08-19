@@ -7,7 +7,6 @@ import java.nio.charset.CodingErrorAction
  * Декодирует вывод hg построчно: сначала пробует строгий UTF-8, а при ошибке
  * откатывается на кодировку из настроек (по умолчанию — ANSI-кодировка системы,
  * на русской Windows это cp1251, в которой обычно и набраны сообщения коммитов).
- * Порт HgVs.Models.HgOutputDecoder.
  */
 object HgOutputDecoder {
 

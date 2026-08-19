@@ -3,7 +3,7 @@ package com.narzaru.mercurial.changes
 import com.narzaru.mercurial.model.HgFileItem
 
 /**
- * Ищет TODO-комментарии в тексте файла. Порт логики ParseTodoItems из HgVs:
+ * Ищет TODO-комментарии в тексте файла:
  * учитывает как строчные (//), так и блочные (/* */) комментарии.
  */
 object TodoParser {

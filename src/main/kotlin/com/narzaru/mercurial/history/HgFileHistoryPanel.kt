@@ -47,7 +47,6 @@ import javax.swing.table.AbstractTableModel
 
 /**
  * Окно истории файла: `hg log -f`, открытие ревизии, дифф выбранных ревизий.
- * Порт HgHistoryToolWindowViewModel + HgHistoryToolWindowControl.
  */
 class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
 

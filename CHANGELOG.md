@@ -1,8 +1,15 @@
 <!-- Keep a Changelog guide -> https://keepachangelog.com -->
 
-# hgrider Changelog
+# Mercurial Port Changelog
 
 ## [Unreleased]
+### Changed
+- README describes the comparison modes as they are now: their current titles, the fixed branch
+  point against the moving parent HEAD, and the fact that both branch modes list the branch's own
+  files only. Renames, the `Show ± Column` toggle and the real summary line were missing from it
+  as well. The same mode wording went into the plugin description.
+- Documentation and comments no longer present the plugin as a port of the Visual Studio
+  extension: the two have diverged far enough that the references only misled.
 
 ## [1.0.4] - 2026-08-18
 ### Fixed

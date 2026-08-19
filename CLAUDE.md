@@ -3,8 +3,7 @@
 Плагин **Mercurial Port** (репозиторий `Narzaru/MercurialPort`, артефакт `mercurial-port`;
 прежнее имя `hgrider` пришлось сменить — имя плагина не должно содержать названий продуктов
 JetBrains, а `hgrider` содержит `rider`) — инструменты Mercurial
-для JetBrains IDE (используется в Rider). Порт расширения
-HgVs для Visual Studio. Практическая цель — «Upsource внутри IDE»: ревью собственной ветки по файлам
+для JetBrains IDE (используется в Rider). Практическая цель — «Upsource внутри IDE»: ревью собственной ветки по файлам
 с отметками «просмотрено».
 
 ## Сборка и проверка

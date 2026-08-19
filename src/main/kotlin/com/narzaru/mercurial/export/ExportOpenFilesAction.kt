@@ -5,7 +5,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.project.DumbAwareAction
 
 /**
- * Копирует открытые файлы в выбранную папку. Порт FileCopyCommand.
+ * Копирует открытые файлы в выбранную папку.
  * Удержание Shift при вызове форсирует повторный выбор папки.
  */
 class ExportOpenFilesAction : DumbAwareAction() {

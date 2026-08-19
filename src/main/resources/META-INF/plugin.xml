@@ -8,8 +8,9 @@
         <p>The point is reviewing your own branch inside the IDE, file by file, the way Upsource does it.</p>
         <ul>
             <li><b>Hg Changes</b>: an Upsource-style tree of branch changes with per-file <code>+N -M</code>,
-                comparison modes (uncommitted, entire branch vs parent, vs parent branch HEAD, vs custom
-                branch), filter/exclude and revert.</li>
+                comparison modes (uncommitted changes, branch changes since the branch point, branch
+                changes vs parent HEAD, vs a named branch), filter/exclude and revert. Both branch modes
+                list the branch's own files only, so changes merged in from the parent stay out.</li>
             <li><b>Review marks</b>: an eye column marks a file as reviewed — per directory as well —
                 with a progress counter; marks are stored per project and survive restarts.</li>
             <li><b>Hg File History</b>: <code>hg log -f</code> for the file in the editor or selected in

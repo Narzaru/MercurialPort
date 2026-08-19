@@ -12,8 +12,7 @@ class HgBytesResult(val exitCode: Int, val stdout: ByteArray, val stderr: String
 
 /**
  * Запускает командную строку Mercurial (`hg`) в указанном рабочем каталоге.
- * Аналог RunHgCommand из HgVs, но аргументы передаются списком, без ручного
- * экранирования кавычек.
+ * Аргументы передаются списком, без ручного экранирования кавычек.
  */
 class HgCommandRunner(private val workDir: File) {
 
