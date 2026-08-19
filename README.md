@@ -3,7 +3,7 @@
 ![Build](https://github.com/Narzaru/MercurialPort/workflows/Build/badge.svg)
 
 Плагин JetBrains IDE для ревью изменений Mercurial внутри IDE: список файлов ветки, дифф по каждому
-файлу и отметки «просмотрено». Заменяет поход в браузер за ревью собственной ветки. Добавляет два
+файлу и отметки «просмотрено». Добавляет два
 тул-окна — **Hg Changes** и **Hg File History** — и действия **Hg Export** в меню Tools.
 
 ## Возможности
