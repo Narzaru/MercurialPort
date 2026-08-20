@@ -4,6 +4,31 @@
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-08-20
+### Fixed
+- **Hg File History loads in seconds, not minutes.** The `hg log` template asked for
+  `{file_copies}`, which makes Mercurial detect copies in every revision — a manifest comparison,
+  ~180 ms per revision. On a file with 1235 revisions the log took **221 s**; the same log without
+  copy detection takes **1.5 s**. The old name is now looked up only where it is actually needed —
+  when `hg cat` does not find the file under its current name — with a single `hg debugrename` per
+  rename found, cached for the session. Renames in the diff still resolve; the list no longer pays
+  for them on every load.
+- **Switching editor tabs no longer starts an `hg log` per tab**: a request that follows the editor
+  waits 300 ms for the switching to stop. Walking through a dozen tabs used to spawn a dozen
+  Mercurial processes, of which only the last one mattered.
+
+### Added
+- **Status letter in editor tab titles** — `Foo.cs [M]` — from the same list Hg Changes shows, so a
+  file you navigate into during a review says by itself whether it is part of the change (and in
+  which way: `M`, `A`, `R`, `?`, `♦`). Letters follow the panel's comparison mode and are refreshed
+  with it; `Status Letter in Editor Tabs` in the ⋮ menu turns them off. No `hg` is run for a tab
+  title — the panel publishes its list, the tabs only read it.
+- **`Always Select Opened File`** in the ⋮ menu, next to `Mark Reviewed on Open`: the row of the
+  file opened in the editor is selected and scrolled to, so a file jumped to mid-review is visibly
+  either part of the change list or not. Selection only — no diff is opened and no review mark is
+  set; when the file is not in the list the selection is cleared, so a stale highlight cannot be
+  mistaken for "this file is changed". Off by default.
+
 ## [1.0.5] - 2026-08-19
 ### Removed
 - **`Branch changes vs parent HEAD` is gone.** Comparing the branch's own files against the parent's

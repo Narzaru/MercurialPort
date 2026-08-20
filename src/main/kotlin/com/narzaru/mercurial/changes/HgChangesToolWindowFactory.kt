@@ -11,6 +11,8 @@ class HgChangesToolWindowFactory : ToolWindowFactory {
         val panel = HgChangesPanel(project)
         panel.installGearActions(toolWindow)
         val content = ContentFactory.getInstance().createContent(panel, "", false)
+        // The panel listens to editor events: it must unsubscribe together with the tool window.
+        content.setDisposer(panel)
         toolWindow.contentManager.addContent(content)
     }
 

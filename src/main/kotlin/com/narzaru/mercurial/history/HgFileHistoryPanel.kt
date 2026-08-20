@@ -5,6 +5,7 @@ import com.narzaru.mercurial.hg.HgCommandRunner
 import com.narzaru.mercurial.hg.HgLogParser
 import com.narzaru.mercurial.hg.HgOutputDecoder
 import com.narzaru.mercurial.hg.HgPaths
+import com.narzaru.mercurial.hg.HgRenameParser
 import com.narzaru.mercurial.model.HgHistoryItem
 import com.intellij.diff.DiffContentFactory
 import com.intellij.diff.requests.SimpleDiffRequest
@@ -32,6 +33,7 @@ import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.table.JBTable
+import com.intellij.util.Alarm
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
@@ -77,6 +79,15 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
     /** Причина последнего неудачного `hg cat` — чтобы показать её вместо молчания. */
     @Volatile
     private var lastCatError: String? = null
+
+    /**
+     * Ответы `hg debugrename`: ключ «ревизия|путь», значение — старое имя либо пустая строка,
+     * если переименования не было. Спрашивают из фоновых потоков, каждый ответ стоит запуска `hg`.
+     */
+    private val renameCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** Гасит череду `hg log` при быстром переключении вкладок редактора. */
+    private val followAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
 
     init {
         buildUi()
@@ -128,7 +139,14 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         if (toolWindow?.isVisible != true) return
         val normalized = File(path).absolutePath
         if (targetFile?.absolutePath.equals(normalized, ignoreCase = true)) return
-        loadHistory(path)
+        if (!fromEditor) {
+            loadHistory(path)
+            return
+        }
+        // По вкладкам редактора ходят насквозь, а каждый `hg log` — это отдельный процесс:
+        // ждём остановки, иначе на промежуточные файлы уходит по запуску Mercurial.
+        followAlarm.cancelAllRequests()
+        followAlarm.addRequest({ loadHistory(path) }, FOLLOW_DEBOUNCE_MS)
     }
 
     // endregion
@@ -314,23 +332,29 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
                 val idx2 = tableModel.indexOf(selected[1])
                 val newer = if (idx1 < idx2) selected[0] else selected[1]
                 val older = if (idx1 < idx2) selected[1] else selected[0]
-                leftContent = catText(root, older.path, older.revision)
-                rightContent = catText(root, newer.path, newer.revision)
+                val newerRow = minOf(idx1, idx2)
+                val olderRow = maxOf(idx1, idx2)
+                leftContent = catFollowingRenames(root, older.path, older.revision, olderRow).text
+                rightContent = catFollowingRenames(root, newer.path, newer.revision, newerRow).text
                 leftLabel = revLabel(older)
                 rightLabel = revLabel(newer)
                 key = "sel|${older.revision}|${newer.revision}"
             } else {
                 // Одна ревизия — показываем, что изменила она сама: сравниваем с её первым
                 // родителем, а не со следующей строкой списка (при слияниях это разные
-                // ревизии). Путь у родителя берём допереименованный (HgHistoryItem.parentPath).
+                // ревизии). Имя у родителя может быть старым — его ищет catFollowingRenames.
                 val item = selected[0]
+                val row = tableModel.indexOf(item)
                 val parent = item.parentRev.toIntOrNull() ?: -1
-                leftContent = if (parent < 0) null else catText(root, item.parentPath, item.parentRev)
-                rightContent = catText(root, item.path, item.revision)
+                val right = catFollowingRenames(root, item.path, item.revision, row)
+                val left = if (parent < 0) Extracted(null, right.path)
+                else catFollowingRenames(root, right.path, item.parentRev, row)
+                leftContent = left.text
+                rightContent = right.text
                 leftLabel = if (parent < 0) "No parent revision" else "Rev ${item.parentRev} (parent)"
                 rightLabel = revLabel(item)
-                if (item.parentPath != item.path) {
-                    leftLabel += " — ${item.parentPath.substringAfterLast('/')}"
+                if (left.path != right.path) {
+                    leftLabel += " — ${left.path.substringAfterLast('/')}"
                 }
                 key = "prev|${item.revision}|${item.path}"
             }
@@ -377,6 +401,47 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         project.service<HgDiffTabManager>().show(HgDiffTabManager.OWNER_HISTORY, key, file.name, request)
     }
 
+    /** Содержимое файла в ревизии и имя, под которым его удалось прочитать. */
+    private class Extracted(val text: String?, val path: String)
+
+    /**
+     * Читает файл в ревизии, доискиваясь старого имени. `hg log` копий не считает — это минуты
+     * на длинной истории (см. [HgLogParser]), — поэтому переименование ищется только там, где
+     * оно действительно мешает: `hg cat` под текущим именем не нашёл файла.
+     *
+     * Ревизии просматриваются от [fromRow] к более новым: переименование, записанное в ревизии R,
+     * означает, что все её предки знали файл под старым именем. Число запросов ограничено —
+     * каждый стоит запуска `hg`, а история переименований длиной в десяток файлов не встречается.
+     */
+    private fun catFollowingRenames(root: File, path: String, rev: String, fromRow: Int): Extracted {
+        var current = path
+        catText(root, current, rev)?.let { return Extracted(it, current) }
+
+        var row = fromRow
+        var lookups = 0
+        while (row >= 0 && lookups < RENAME_LOOKUPS) {
+            val at = tableModel.itemAt(row)?.revision ?: break
+            lookups++
+            val source = renameSource(root, at, current)
+            if (source != null && !source.equals(current, ignoreCase = true)) {
+                current = source
+                catText(root, current, rev)?.let { return Extracted(it, current) }
+            }
+            row--
+        }
+        return Extracted(null, current)
+    }
+
+    /** Старое имя [path] в ревизии [rev] или `null`. Ответ кэшируется: он стоит запуска `hg`. */
+    private fun renameSource(root: File, rev: String, path: String): String? {
+        val key = "$rev|${HgPaths.key(path)}"
+        renameCache[key]?.let { return it.ifEmpty { null } }
+        val res = HgCommandRunner(root).run("debugrename", "-r", rev, path)
+        val source = if (res.success) HgRenameParser.sourceOf(res.stdout) else null
+        renameCache[key] = source.orEmpty()
+        return source
+    }
+
     private fun catText(root: File, rel: String, rev: String): String? {
         val res = HgCommandRunner(root).runToBytesDetailed(listOf("cat", "-r", rev, rel))
         if (res.exitCode == 0) return HgOutputDecoder.decode(res.stdout)
@@ -421,6 +486,12 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
 
     private companion object {
         const val TOOL_WINDOW_ID = "Hg File History"
+
+        /** Пауза перед `hg log` при переходе по вкладкам редактора. */
+        const val FOLLOW_DEBOUNCE_MS = 300
+
+        /** Сколько ревизий опросить в поисках старого имени: каждая — отдельный запуск `hg`. */
+        const val RENAME_LOOKUPS = 8
 
         /** Ширины колонки даты: в ней остался только день. */
         const val DATE_COLUMN_WIDTH = 80

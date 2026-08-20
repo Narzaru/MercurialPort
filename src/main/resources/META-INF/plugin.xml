@@ -31,6 +31,7 @@
         <toolWindow id="Hg Changes"
                     anchor="bottom"
                     factoryClass="com.narzaru.mercurial.changes.HgChangesToolWindowFactory"/>
+        <editorTabTitleProvider implementation="com.narzaru.mercurial.status.HgEditorTabTitleProvider"/>
         <applicationConfigurable parentId="tools"
                                  id="mercurial.settings"
                                  displayName="Mercurial Port"

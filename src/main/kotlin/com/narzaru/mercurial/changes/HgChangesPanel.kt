@@ -12,9 +12,11 @@ import com.narzaru.mercurial.history.HgFileHistoryService
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
 import com.narzaru.mercurial.model.HgListMode
+import com.narzaru.mercurial.status.HgFileStatusService
 import com.intellij.diff.DiffContentFactory
 import com.intellij.diff.requests.SimpleDiffRequest
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionToolbar
 import com.intellij.openapi.actionSystem.ActionUpdateThread
@@ -29,6 +31,8 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.options.ShowSettingsUtil
@@ -36,6 +40,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ex.ToolWindowEx
 import com.intellij.ui.DocumentAdapter
@@ -77,7 +82,7 @@ import javax.swing.tree.TreePath
  * Разбор вывода `hg` живёт в пакете `hg`, отметки — в [ReviewState], отрисовка строк —
  * в [ChangesTreeRenderers]; здесь остаётся сборка UI и оркестровка.
  */
-class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
+class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
 
     private val settings = ChangesSettings(project)
     private val review = ReviewState(settings)
@@ -186,8 +191,11 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
         buildUi()
         loadSettings()
         uiReady = true
+        followActiveEditor()
         refresh()
     }
+
+    override fun dispose() = Unit
 
     // region Выбор строки -----------------------------------------------------
 
@@ -215,6 +223,53 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
         if (!uiReady) return
         selectionAlarm.cancelAllRequests()
         selectionAlarm.addRequest({ activateRow(row) }, SELECTION_DEBOUNCE_MS)
+    }
+
+    /**
+     * Highlights the file opened in the editor, the way `Always Select Opened File` works for
+     * the project view. Selection only — no diff and no review mark: during a review one jumps
+     * to a neighbouring class just to read it, and that must not count as reviewing it.
+     */
+    private fun followActiveEditor() {
+        project.messageBus.connect(this).subscribe(
+            FileEditorManagerListener.FILE_EDITOR_MANAGER,
+            object : FileEditorManagerListener {
+                override fun selectionChanged(event: FileEditorManagerEvent) {
+                    if (!settings.selectOpenedFile) return
+                    val file = event.newFile ?: return
+                    // A diff tab is not a file on disk: its path is not in the list anyway.
+                    if (file.isDirectory || !file.isInLocalFileSystem) return
+                    selectOpenedFile(file)
+                }
+            }
+        )
+    }
+
+    /**
+     * Selects the row of the opened file, and clears the selection when the file is not in the
+     * list: a stale highlight on another row would read as "this file is changed", which is
+     * exactly the question being asked.
+     */
+    private fun selectOpenedFile(file: VirtualFile) {
+        val repoRoot = currentRepoRoot ?: return
+        val relative = HgPaths.relativize(
+            HgPaths.normalize(file.path),
+            // VFS reports paths with `/`, File.absolutePath on Windows with `\`.
+            HgPaths.normalize(repoRoot.absolutePath)
+        ) ?: return
+        val key = HgPaths.key(relative)
+        // A pending row activation from arrow-key scrolling is moot once we move elsewhere.
+        selectionAlarm.cancelAllRequests()
+        for (row in 0 until tree.rowCount) {
+            val item = (nodeAt(row)?.userObject as? FileNode)?.item ?: continue
+            if (HgPaths.key(item.path) != key) continue
+            if (!tree.selectionModel.isSelectedIndex(row) || tree.selectedRowCount > 1) {
+                tree.selectionModel.setSelectionInterval(row, row)
+            }
+            tree.scrollRectToVisible(tree.getCellRect(row, 0, true))
+            return
+        }
+        tree.selectionModel.clearSelection()
     }
 
     // endregion
@@ -447,6 +502,28 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
                 toggle("Mark Reviewed on Open", "Mark a file reviewed when it is opened", null,
                     { settings.markReviewedOnOpen }) {
                     settings.markReviewedOnOpen = !settings.markReviewedOnOpen
+                },
+                toggle(
+                    "Always Select Opened File",
+                    "Select the row of the file opened in the editor (no diff, no review mark)",
+                    null,
+                    { settings.selectOpenedFile }
+                ) {
+                    settings.selectOpenedFile = !settings.selectOpenedFile
+                    if (settings.selectOpenedFile) {
+                        FileEditorManager.getInstance(project).selectedFiles.firstOrNull()
+                            ?.takeIf { !it.isDirectory && it.isInLocalFileSystem }
+                            ?.let { selectOpenedFile(it) }
+                    }
+                },
+                toggle(
+                    "Status Letter in Editor Tabs",
+                    "Append the file status to the editor tab title: Foo.cs [M]",
+                    null,
+                    { settings.statusInTabs }
+                ) {
+                    settings.statusInTabs = !settings.statusInTabs
+                    project.service<HgFileStatusService>().refreshOpenTabs()
                 },
                 action("Encoding Settings…", "Encoding of commit messages and hg output", null) {
                     ShowSettingsUtil.getInstance().showSettingsDialog(project, HgSettingsConfigurable::class.java)
@@ -701,6 +778,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
                     sourceFiles.addAll(result.files)
                     showStatus(result.statusText)
                 }
+                publishStatuses()
                 if (listMode == HgListMode.TODO) scanTodos() else renderFiltered()
                 if (result.error == null && result.files.isNotEmpty()) {
                     loadDiffStats(repoRoot, result.targetRev)
@@ -735,9 +813,20 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()) {
                         removed = stat?.removed ?: 0
                     )
                 }
+                publishStatuses()
                 if (listMode == HgListMode.FILES) renderFiltered()
             }
         }
+    }
+
+    /**
+     * Hands the current statuses to [HgFileStatusService], which puts them into editor tab
+     * titles. Called after the stats pass as well: only there does an `M` with an empty diff
+     * turn into [UNCHANGED_STATUS].
+     */
+    private fun publishStatuses() {
+        val repoRoot = currentRepoRoot ?: return
+        project.service<HgFileStatusService>().update(repoRoot, sourceFiles)
     }
 
     private class ChangesResult(

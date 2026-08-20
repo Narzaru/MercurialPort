@@ -45,6 +45,24 @@ class ChangesSettings(project: Project) : ReviewedPathsStore {
         get() = props.getBoolean(key("markReviewedOnOpen"), true)
         set(value) = props.setValue(key("markReviewedOnOpen"), value, true)
 
+    /**
+     * Highlight the file opened in the editor by selecting its row in the tree — the way
+     * `Always Select Opened File` works for the project view. Selection only: no diff and no
+     * review mark, so jumping around the code during a review does not mark files as seen.
+     */
+    var selectOpenedFile: Boolean
+        get() = props.getBoolean(key("selectOpenedFile"), false)
+        set(value) = props.setValue(key("selectOpenedFile"), value, false)
+
+    /**
+     * Append the file's status letter to its editor tab title (`Foo.cs [M]`). Which files the
+     * letters come from follows the panel's comparison mode, so the tabs say the same thing the
+     * change list does.
+     */
+    var statusInTabs: Boolean
+        get() = props.getBoolean(key("statusInTabs"), true)
+        set(value) = props.setValue(key("statusInTabs"), value, true)
+
     override fun load(): List<String> = props.getList(key("reviewed")).orEmpty()
 
     override fun save(paths: List<String>) = props.setList(key("reviewed"), paths)
