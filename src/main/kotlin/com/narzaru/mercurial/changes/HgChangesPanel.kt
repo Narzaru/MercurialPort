@@ -40,7 +40,6 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
-import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ex.ToolWindowEx
 import com.intellij.ui.DocumentAdapter
@@ -92,6 +91,9 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private var listMode = HgListMode.FILES
     private var showUntracked = false
     private var showUnchanged = false
+
+    /** `Base` mode only: drop files a merge took whole from the parent branch. */
+    private var ownChangesOnly = false
     private var filtersVisible = false
     private var statsVisible = true
     private var currentRepoRoot: File? = null
@@ -237,9 +239,12 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                 override fun selectionChanged(event: FileEditorManagerEvent) {
                     if (!settings.selectOpenedFile) return
                     val file = event.newFile ?: return
-                    // A diff tab is not a file on disk: its path is not in the list anyway.
-                    if (file.isDirectory || !file.isInLocalFileSystem) return
-                    selectOpenedFile(file)
+                    if (file.isDirectory) return
+                    // A diff tab is not a file on disk — the manager knows which file it shows.
+                    // Without this, coming back to a diff tab left the list pointing elsewhere.
+                    val path = if (file.isInLocalFileSystem) file.path
+                    else project.service<HgDiffTabManager>().sourcePathOf(file) ?: return
+                    selectOpenedFile(path)
                 }
             }
         )
@@ -250,10 +255,19 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
      * list: a stale highlight on another row would read as "this file is changed", which is
      * exactly the question being asked.
      */
-    private fun selectOpenedFile(file: VirtualFile) {
+    /** Подсвечивает файл, открытый в редакторе прямо сейчас, — дифф-вкладку в том числе. */
+    private fun selectCurrentEditorFile() {
+        val file = FileEditorManager.getInstance(project).selectedFiles.firstOrNull() ?: return
+        if (file.isDirectory) return
+        val path = if (file.isInLocalFileSystem) file.path
+        else project.service<HgDiffTabManager>().sourcePathOf(file) ?: return
+        selectOpenedFile(path)
+    }
+
+    private fun selectOpenedFile(filePath: String) {
         val repoRoot = currentRepoRoot ?: return
         val relative = HgPaths.relativize(
-            HgPaths.normalize(file.path),
+            HgPaths.normalize(filePath),
             // VFS reports paths with `/`, File.absolutePath on Windows with `\`.
             HgPaths.normalize(repoRoot.absolutePath)
         ) ?: return
@@ -320,6 +334,17 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             { showUnchanged }) { setShowUnchanged(!showUnchanged) })
         group.add(toggle("Filter", "Show the Filter/Exclude fields", AllIcons.General.Filter,
             { filtersVisible }) { setFiltersVisible(!filtersVisible) })
+        // Своя категория: остальные тумблеры решают, что показать из уже собранного списка,
+        // а этот меняет сам список — для него нужен новый запрос к hg.
+        group.add(Separator.getInstance())
+        group.add(toggle(
+            "Own Changes Only",
+            "Hide files whose content matches the parent branch: everything in them came from a " +
+                "merge, not from this branch. Applies to the '${HgDisplayMode.BRANCH.title}' mode.",
+            HgIcons.MERGE_CROSSED,
+            { ownChangesOnly },
+            { displayMode == HgDisplayMode.BRANCH && !busy }
+        ) { setOwnChangesOnly(!ownChangesOnly) })
 
         val toolbar = ActionManager.getInstance().createActionToolbar("HgChanges", group, true)
         toolbar.targetComponent = this
@@ -401,10 +426,17 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         description: String,
         icon: Icon?,
         selected: () -> Boolean,
+        enabled: () -> Boolean = { true },
         perform: () -> Unit
     ): ToggleAction = object : ToggleAction(text, description, icon) {
         override fun isSelected(e: AnActionEvent) = selected()
         override fun setSelected(e: AnActionEvent, state: Boolean) = perform()
+
+        override fun update(e: AnActionEvent) {
+            super.update(e)
+            e.presentation.isEnabled = enabled()
+        }
+
         override fun getActionUpdateThread() = ActionUpdateThread.EDT
     }
 
@@ -510,11 +542,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                     { settings.selectOpenedFile }
                 ) {
                     settings.selectOpenedFile = !settings.selectOpenedFile
-                    if (settings.selectOpenedFile) {
-                        FileEditorManager.getInstance(project).selectedFiles.firstOrNull()
-                            ?.takeIf { !it.isDirectory && it.isInLocalFileSystem }
-                            ?.let { selectOpenedFile(it) }
-                    }
+                    if (settings.selectOpenedFile) selectCurrentEditorFile()
                 },
                 toggle(
                     "Status Letter in Editor Tabs",
@@ -645,6 +673,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         // почти всегда, и «скрыть» переживало перезапуск лишь при пустых фильтрах.
         setFiltersVisible(settings.filtersVisible)
         showUnchanged = settings.showUnchanged
+        ownChangesOnly = settings.ownChangesOnly
         statsVisible = settings.statsColumnVisible
         applyStatsColumnVisibility()
         review.reload()
@@ -673,6 +702,13 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         settings.showUnchanged = visible
         // Флаг isUnchanged уже посчитан в loadDiffStats — перечитывать hg незачем.
         renderFiltered()
+    }
+
+    private fun setOwnChangesOnly(enabled: Boolean) {
+        ownChangesOnly = enabled
+        settings.ownChangesOnly = enabled
+        // Меняется сам список файлов, а не его показ, — нужен новый запрос к hg.
+        refresh()
     }
 
     private fun updateBranchFieldVisibility() {
@@ -753,6 +789,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         showStatus("Loading…")
         val mode = displayMode
         val untracked = showUntracked
+        val ownOnly = ownChangesOnly
 
         ApplicationManager.getApplication().executeOnPooledThread {
             val repoRoot = HgCommandRunner.findRepoRoot(start)
@@ -761,7 +798,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                 return@executeOnPooledThread
             }
             val runner = HgCommandRunner(repoRoot)
-            val result = computeChanges(runner, mode, customBranch, untracked)
+            val result = computeChanges(runner, mode, customBranch, untracked, ownOnly)
 
             onEdt {
                 setBusy(false)
@@ -840,7 +877,8 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         runner: HgCommandRunner,
         mode: HgDisplayMode,
         customBranch: String,
-        untracked: Boolean
+        untracked: Boolean,
+        ownChangesOnly: Boolean
     ): ChangesResult {
         val targetRev = when (mode) {
             HgDisplayMode.CUSTOM_BRANCH -> customBranch
@@ -850,7 +888,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
         // The branch mode is limited to the files its own revisions touched: otherwise a parent
         // merged into the branch shows up as the branch's own work. `VS` compares everything.
-        val scope = if (mode == HgDisplayMode.BRANCH) branchOwnFiles(runner) else null
+        val scope = if (mode == HgDisplayMode.BRANCH) branchScope(runner, ownChangesOnly) else null
 
         val template = StatusTextFormatter.REVISION_TEMPLATE
         val currentInfo = runner.run("log", "-r", ".", "--template", template)
@@ -887,11 +925,32 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun branchOwnFiles(runner: HgCommandRunner): Set<String>? {
         val r = runner.run("log", "-r", BRANCH_REVS, "--template", "{join(files, '\\n')}\\n")
         if (!r.success) return null
-        val files = r.stdout.split('\r', '\n')
-            .mapNotNull { it.trim().ifEmpty { null } }
-            .map { HgPaths.key(it) }
-            .toSet()
-        return files.ifEmpty { null }
+        return BranchScope.ownFiles(r.stdout).ifEmpty { null }
+    }
+
+    /**
+     * Множество файлов режима `Base`: собственные файлы ветки, при включённом
+     * [ownChangesOnly] — суженные до тех, куда ветка положила своё содержимое.
+     */
+    private fun branchScope(runner: HgCommandRunner, ownChangesOnly: Boolean): Set<String>? {
+        val own = branchOwnFiles(runner) ?: return null
+        if (!ownChangesOnly) return own
+        val contributed = branchContributedFiles(runner) ?: return own
+        return BranchScope.narrow(own, contributed)
+    }
+
+    /**
+     * Файлы, содержимое которых на конце ветки отличается от родительской ветки: дифф
+     * относительно точки слияния. Именно он отделяет свои правки от влитых — см. [BranchScope].
+     *
+     * Дифф считается по байтам и стоит меньше диффа от точки ответвления: расходятся ветки
+     * обычно куда меньше, чем ветка успела наработать. `null` — hg не ответил, тогда сужение
+     * просто не применяется.
+     */
+    private fun branchContributedFiles(runner: HgCommandRunner): Set<String>? {
+        val (exit, bytes) = runner.runToBytes(listOf("diff", "--git", "--rev", MERGE_BASE_REV))
+        if (exit != 0) return null
+        return BranchScope.contributedFiles(HgDiffStatParser.parse(bytes).keys)
     }
 
     /** A root branch has no parent and `hg status --rev` fails — point at a mode that works. */
@@ -1132,7 +1191,8 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         // Вкладками владеет общий менеджер: иначе это окно и Hg File History держат каждое
         // свою вкладку, и на экране оказывается два диффа сразу.
         val request = SimpleDiffRequest(name, baseContent, localContent, baseTitle, localTitle)
-        project.service<HgDiffTabManager>().show(HgDiffTabManager.OWNER_CHANGES, key, name, request)
+        project.service<HgDiffTabManager>()
+            .show(HgDiffTabManager.OWNER_CHANGES, key, name, request, tree, localFile.path)
     }
 
     private fun revertSelected() {

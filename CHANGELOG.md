@@ -4,6 +4,43 @@
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-08-31
+### Added
+- **`Own Changes Only` toggle** (toolbar, its own group after `Filter`) for the
+  `Base` mode: keeps only the files the branch really left content of its own in. A merge
+  revision lists a file whenever both sides touched it — even when the merge took the parent's
+  version whole and the branch's own edits had already been reverted. Such a file showed up as
+  changed with the parent's `+N −M` against it. The toggle intersects the branch's own files with
+  those that really differ from the merge point (`hg diff --git --rev <merge base>`), which drops
+  them. Off by default: the unfiltered list is the one Upsource shows.
+
+### Changed
+- **Hg File History shows a wrapped tooltip instead of the inline expansion.** `Message` is the
+  rightmost column of a narrow tool window, and the platform's expandable item continued the cell
+  as one line to the right — off the screen, so the message could only be read by widening the tool
+  window. Truncated cells now show the full text as a fixed-width block, wrapped by words and
+  dropped below the row from the left edge of the table.
+- **Hg File History follows diff tabs too.** A diff is not a file on disk, so the panel used to
+  ignore it: opening a file from a diff and coming back to the diff tab left the history showing
+  the file that was visited in between. The source file of a diff tab is now taken from
+  `HgDiffTabManager`, the same way Hg Changes does it for `Always Select Opened File`.
+- **`Always Select Opened File` now follows diff tabs too.** A diff is not a file on disk, so
+  switching to one left the list pointing at whatever was selected before — exactly when the
+  highlight matters, since a diff tab is where a review is read. `HgDiffTabManager` now remembers
+  which file each of its tabs shows, and the row is selected for both.
+
+### Fixed
+- **Opening a diff no longer flashes an open editor tab and steals the focus.** The previous diff
+  tab was closed before the new one appeared, and closing the selected tab moves the editor to its
+  neighbour — if that neighbour was the very file being reviewed, it flashed by and took the focus.
+  The new diff is now shown first and the old tab closed after it, so nothing else is ever selected
+  in between. The focus is also parked back in the file list once the platform is done moving tabs
+  around, which covers the case where the editor area has to be created from scratch.
+- **The focus lands in the file list even when the diff was requested from the toolbar.** Where it
+  goes is no longer read from whoever held it at that moment: toolbar buttons do not take the focus,
+  so after switching to an open file and pressing `Show Diff` the "restore what was there" rule
+  handed the focus straight back to that file. The requesting panel now names the list to return to.
+
 ## [1.0.6] - 2026-08-20
 ### Fixed
 - **Hg File History loads in seconds, not minutes.** The `hg log` template asked for

@@ -21,6 +21,9 @@ object HgIcons {
     /** «Показывать то, что обычно скрыто» — неотслеживаемые файлы. */
     val EYE_CROSSED: Icon = SlashedIcon(AllIcons.General.Show)
 
+    /** «Не считать влитое из родительской ветки» — тот же merge, только вычеркнутый. */
+    val MERGE_CROSSED: Icon = SlashedIcon(AllIcons.Vcs.Merge)
+
     /** Файл просмотрен. */
     val DOT_FILLED: Icon = DotIcon(filled = true)
 

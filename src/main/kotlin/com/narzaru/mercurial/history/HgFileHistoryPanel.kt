@@ -38,6 +38,8 @@ import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
 import java.awt.Component
+import java.awt.Point
+import java.awt.event.MouseEvent
 import java.io.File
 import javax.swing.BoxLayout
 import javax.swing.Icon
@@ -68,7 +70,21 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
     private val titleLabel = JBLabel("No file selected")
     private val statusLabel = JBLabel("Ready")
     private val tableModel = HistoryTableModel()
-    private val table = JBTable(tableModel)
+    private val table = object : JBTable(tableModel) {
+        override fun getToolTipText(event: MouseEvent): String? = tooltipAt(event)
+
+        /**
+         * Подсказка показывается под строкой и от левого края таблицы: колонка сообщения —
+         * крайняя правая, и всплывающая у курсора подсказка уезжала за границу экрана.
+         */
+        override fun getToolTipLocation(event: MouseEvent): Point? {
+            if (tooltipAt(event) == null) return null
+            val row = rowAtPoint(event.point)
+            if (row < 0) return null
+            val cell = getCellRect(row, 0, true)
+            return Point(0, cell.y + cell.height)
+        }
+    }
 
     /** Быстрые клики по списку: показываем только результат последнего запроса. */
     private var diffRequestId = 0
@@ -92,15 +108,27 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
     init {
         buildUi()
         followActiveEditor()
-        currentEditorFile()?.let { loadHistory(it.path) }
+        currentEditorPath()?.let { loadHistory(it) }
     }
 
     override fun dispose() = Unit
 
     // region Привязка к редактору ---------------------------------------------
 
-    private fun currentEditorFile(): VirtualFile? =
-        FileEditorManager.getInstance(project).selectedFiles.firstOrNull()?.takeIf { !it.isDirectory }
+    private fun currentEditorPath(): String? =
+        FileEditorManager.getInstance(project).selectedFiles.firstOrNull()
+            ?.takeIf { !it.isDirectory }
+            ?.let { sourcePathOf(it) }
+
+    /**
+     * Путь файла, историю которого показывает эта вкладка редактора. Дифф-вкладка файлом на
+     * диске не является, но [HgDiffTabManager] помнит, чей дифф в ней открыт: без этого возврат
+     * на вкладку с диффом оставлял в окне историю того файла, куда успели сходить из диффа.
+     * `null` — вкладка чужая (дифф не наш, консоль и прочее), за такой панель не идёт.
+     */
+    private fun sourcePathOf(file: VirtualFile): String? =
+        if (file.isInLocalFileSystem) file.path
+        else project.service<HgDiffTabManager>().sourcePathOf(file)
 
     /**
      * Панель сама показывает историю файла, открытого в редакторе: иначе окно
@@ -112,10 +140,8 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
             object : FileEditorManagerListener {
                 override fun selectionChanged(event: FileEditorManagerEvent) {
                     val file = event.newFile?.takeIf { !it.isDirectory } ?: return
-                    // Дифф-вкладка — не файл на диске: пойдя за ней, панель перезагружала
-                    // историю для несуществующего пути и очищала список.
-                    if (!file.isInLocalFileSystem) return
-                    requestHistory(file.path, fromEditor = true)
+                    val path = sourcePathOf(file) ?: return
+                    requestHistory(path, fromEditor = true)
                 }
             }
         )
@@ -174,8 +200,37 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
             }
         })
         configureDateColumn()
+        // Штатная «раскрывашка» JBTable дорисовывает хвост ячейки вправо одной строкой — у крайней
+        // правой колонки сообщения он уходит за экран. Вместо неё — свой тултип с переносом.
+        table.setExpandableItemsEnabled(false)
         add(JBScrollPane(table), BorderLayout.CENTER)
     }
+
+    /**
+     * Подсказка по ячейке под курсором: полная дата и, если текст не поместился в колонку,
+     * его полный текст — длинный переносится по словам, короткий остаётся строкой по себе.
+     */
+    private fun tooltipAt(event: MouseEvent): String? {
+        val row = table.rowAtPoint(event.point)
+        val viewColumn = table.columnAtPoint(event.point)
+        if (row < 0 || viewColumn < 0) return null
+        val modelColumn = table.convertColumnIndexToModel(viewColumn)
+
+        val raw = tableModel.getValueAt(row, modelColumn).toString()
+        // У даты в колонке только день, поэтому подсказка нужна независимо от ширины.
+        if (modelColumn == HistoryTableModel.COL_DATE) return tooltipFor(HistoryDateText.full(raw).orEmpty())
+        if (!isTruncated(raw, viewColumn)) return null
+        return tooltipFor(raw)
+    }
+
+    private fun tooltipFor(text: String): String? =
+        HistoryTooltipText.wrapped(text, JBUI.scale(TOOLTIP_WIDTH), textWidth(text))
+
+    /** Помещается ли текст в колонку: тултип-дубликат на каждой строке только мешает. */
+    private fun isTruncated(text: String, viewColumn: Int): Boolean =
+        textWidth(text) > table.columnModel.getColumn(viewColumn).width - JBUI.scale(CELL_PADDING)
+
+    private fun textWidth(text: String): Int = table.getFontMetrics(table.font).stringWidth(text)
 
     /**
      * Дата: в колонке — только день, время и часовой пояс уходят в тултип. Колонка от этого
@@ -192,9 +247,8 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
                 super.getTableCellRendererComponent(
                     table, HistoryDateText.day(raw), isSelected, hasFocus, row, column
                 )
-                // JTable спрашивает подсказку у компонента, отрисовавшего ячейку под курсором,
-                // так что переиспользуемый рендерер здесь безопасен.
-                toolTipText = HistoryDateText.full(raw)
+                // Полное значение отдаёт tooltipAt: подсказки таблицы собраны в одном месте,
+                // чтобы все они были одинаковыми блоками с переносом.
                 return this
             }
         }
@@ -398,7 +452,8 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         // Вкладками владеет общий менеджер: иначе Hg Changes и это окно держат каждое свою,
         // и на экране оказывается два диффа сразу.
         val request = SimpleDiffRequest(file.name, left, right, leftTitle, rightTitle)
-        project.service<HgDiffTabManager>().show(HgDiffTabManager.OWNER_HISTORY, key, file.name, request)
+        project.service<HgDiffTabManager>()
+            .show(HgDiffTabManager.OWNER_HISTORY, key, file.name, request, table, file.path)
     }
 
     /** Содержимое файла в ревизии и имя, под которым его удалось прочитать. */
@@ -496,6 +551,12 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         /** Ширины колонки даты: в ней остался только день. */
         const val DATE_COLUMN_WIDTH = 80
         const val DATE_COLUMN_MAX_WIDTH = 110
+
+        /** Ширина тултипа: по ней HTML переносит текст по словам. */
+        const val TOOLTIP_WIDTH = 420
+
+        /** Отступы ячейки, на которые текст короче ширины колонки. */
+        const val CELL_PADDING = 8
 
         val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(HgFileHistoryPanel::class.java)
     }

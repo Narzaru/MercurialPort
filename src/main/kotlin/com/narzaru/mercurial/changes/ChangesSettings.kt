@@ -32,6 +32,15 @@ class ChangesSettings(project: Project) : ReviewedPathsStore {
         get() = props.getBoolean(key("showUnchanged"), false)
         set(value) = props.setValue(key("showUnchanged"), value, false)
 
+    /**
+     * `Base` mode: keep only the files the branch really left content of its own in, dropping
+     * the ones a merge took whole from the parent branch. Off by default — the unfiltered list
+     * is the one Upsource shows, and this is a deliberate narrowing of it. See [BranchScope].
+     */
+    var ownChangesOnly: Boolean
+        get() = props.getBoolean(key("ownChangesOnly"), false)
+        set(value) = props.setValue(key("ownChangesOnly"), value, false)
+
     var statsColumnVisible: Boolean
         get() = props.getBoolean(key("statsColumn"), true)
         set(value) = props.setValue(key("statsColumn"), value, true)
