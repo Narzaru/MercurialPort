@@ -34,6 +34,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.actionSystem.ToggleAction
+import com.intellij.openapi.actionSystem.toolbarLayout.ToolbarLayoutStrategy
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.components.service
@@ -377,7 +378,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
         val created = ActionManager.getInstance().createActionToolbar("HgChanges", group, true)
         created.targetComponent = this
-        created.setLayoutPolicy(ActionToolbar.WRAP_LAYOUT_POLICY)
+        created.layoutStrategy = ToolbarLayoutStrategy.WRAP_STRATEGY
         toolbar = created
         return created.component
     }

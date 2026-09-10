@@ -12,12 +12,12 @@ import com.intellij.diff.requests.SimpleDiffRequest
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
-import com.intellij.openapi.actionSystem.ActionToolbar
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.Separator
+import com.intellij.openapi.actionSystem.toolbarLayout.ToolbarLayoutStrategy
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
@@ -210,7 +210,7 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
 
         val toolbar = ActionManager.getInstance().createActionToolbar("HgFileHistory", group, true)
         toolbar.targetComponent = this
-        toolbar.setLayoutPolicy(ActionToolbar.WRAP_LAYOUT_POLICY)
+        toolbar.layoutStrategy = ToolbarLayoutStrategy.WRAP_STRATEGY
         return toolbar.component
     }
 
