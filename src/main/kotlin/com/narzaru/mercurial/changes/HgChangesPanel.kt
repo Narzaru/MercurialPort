@@ -36,9 +36,7 @@ import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.actionSystem.ToggleAction
 import com.intellij.openapi.actionSystem.toolbarLayout.ToolbarLayoutStrategy
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.components.service
-import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.event.DocumentEvent as EditorDocumentEvent
@@ -54,6 +52,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.util.Computable
 import com.intellij.openapi.util.Pair
 import com.intellij.ui.JBSplitter
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -1127,11 +1126,9 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun readFileText(fullPath: File): String {
         val vf = LocalFileSystem.getInstance().findFileByIoFile(fullPath)
         if (vf != null) {
-            val doc = ReadAction.compute<Document?, RuntimeException> {
-                FileDocumentManager.getInstance().getDocument(vf)
-            }
+            val doc = inReadAction { FileDocumentManager.getInstance().getDocument(vf) }
             if (doc != null) {
-                return ReadAction.compute<String, RuntimeException> { doc.text }
+                return inReadAction { doc.text }
             }
         }
         return try {
@@ -1359,14 +1356,12 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     }
 
     private fun localMatches(file: VirtualFile, text: String): Boolean {
-        val document = ReadAction.compute<Document?, RuntimeException> {
-            FileDocumentManager.getInstance().getDocument(file)
-        }
+        val document = inReadAction { FileDocumentManager.getInstance().getDocument(file) }
         if (document == null) {
             LOG.info("Hg diff: no document for ${file.path}, right side falls back to the revision")
             return false
         }
-        val local = ReadAction.compute<String, RuntimeException> { document.text }
+        val local = inReadAction { document.text }
         if (local == text) return true
         LOG.info(
             "Hg diff: ${file.path} differs from the revision, right side falls back to it. " +
@@ -1472,3 +1467,6 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         const val EYE_WIDTH = 26
     }
 }
+
+private fun <T> inReadAction(compute: () -> T): T =
+    ApplicationManager.getApplication().runReadAction(Computable(compute))

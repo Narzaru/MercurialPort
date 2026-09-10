@@ -4,7 +4,6 @@ import com.narzaru.mercurial.history.HgFileHistoryService
 import com.intellij.diff.chains.DiffRequestChain
 import com.intellij.diff.chains.SimpleDiffRequestChain
 import com.intellij.diff.editor.DiffEditorTabFilesManager
-import com.intellij.diff.editor.DiffEditorTabFilesUtil
 import com.intellij.diff.requests.DiffRequest
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
@@ -12,12 +11,14 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
-import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
-import com.intellij.openapi.fileEditor.impl.FileEditorOpenOptions
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.options.advanced.AdvancedSettings
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.IdeFocusManager
 import java.awt.Component
+
+private const val SHOW_DIFF_AS_EDITOR_TAB_SETTING = "show.diff.as.editor.tab"
 
 @Service(Service.Level.PROJECT)
 class HgDiffTabManager(private val project: Project) : Disposable {
@@ -112,14 +113,14 @@ class HgDiffTabManager(private val project: Project) : Disposable {
     }
 
     private fun showTab(diffFile: VirtualFile, requestFocus: Boolean = false) {
-        if (!DiffEditorTabFilesUtil.isDiffInEditor) {
+        if (!opensAsEditorTab()) {
             DiffEditorTabFilesManager.getInstance(project).showDiffFile(diffFile, requestFocus)
             return
         }
-        FileEditorManagerEx.getInstanceEx(project).openFile(
-            diffFile,
-            null,
-            FileEditorOpenOptions(reuseOpen = true, usePreviewTab = true, requestFocus = requestFocus)
-        )
+        val target = OpenFileDescriptor(project, diffFile).setUsePreviewTab(true)
+        FileEditorManager.getInstance(project).openFileEditor(target, requestFocus)
     }
+
+    private fun opensAsEditorTab(): Boolean =
+        AdvancedSettings.getBoolean(SHOW_DIFF_AS_EDITOR_TAB_SETTING)
 }
