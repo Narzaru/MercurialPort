@@ -3,7 +3,6 @@ package com.narzaru.mercurial.changes
 import com.narzaru.mercurial.model.HgFileItem
 import javax.swing.tree.DefaultMutableTreeNode
 
-/** Каталог в дереве изменений. `name` может покрывать несколько уровней: `Cad.Toolware.Tests/RayTracing`. */
 class DirNode(var name: String) {
     var fileCount: Int = 0
     var added: Int = 0
@@ -13,16 +12,10 @@ class DirNode(var name: String) {
     override fun toString() = name
 }
 
-/** Файл в дереве изменений. */
 class FileNode(val item: HgFileItem) {
     override fun toString() = item.name
 }
 
-/**
- * Строит дерево каталогов по списку файлов в стиле Upsource: цепочки каталогов
- * с единственным потомком схлопываются в одну строку (`Cad.Toolware.Tests/RayTracing`),
- * файлы каждого каталога идут по алфавиту после подкаталогов.
- */
 object ChangesTreeBuilder {
 
     fun build(items: List<HgFileItem>, isReviewed: (HgFileItem) -> Boolean): DefaultMutableTreeNode {
@@ -42,7 +35,28 @@ object ChangesTreeBuilder {
         return root
     }
 
-    /** Возвращает (создавая при необходимости) узел каталога для пути `a/b/c`. */
+    fun refresh(
+        root: DefaultMutableTreeNode,
+        items: List<HgFileItem>,
+        isReviewed: (HgFileItem) -> Boolean
+    ) {
+        val byKey = HashMap<String, HgFileItem>(items.size)
+        for (item in items) byKey[TreeRefreshPlan.nodeKey(item)] = item
+        replaceItems(root, byKey)
+        aggregate(root, isReviewed)
+    }
+
+    private fun replaceItems(node: DefaultMutableTreeNode, byKey: Map<String, HgFileItem>) {
+        when (val payload = node.userObject) {
+            is FileNode -> byKey[TreeRefreshPlan.nodeKey(payload.item)]?.let {
+                node.userObject = FileNode(it)
+            }
+            is DirNode -> for (i in 0 until node.childCount) {
+                replaceItems(node.getChildAt(i) as DefaultMutableTreeNode, byKey)
+            }
+        }
+    }
+
     private fun dirNode(
         path: String,
         cache: HashMap<String, DefaultMutableTreeNode>,
@@ -54,7 +68,6 @@ object ChangesTreeBuilder {
         val parentPath = path.substringBeforeLast('/', "")
         val parent = dirNode(parentPath, cache, root)
         val node = DefaultMutableTreeNode(DirNode(path.substringAfterLast('/')))
-        // Каталоги держим перед файлами.
         val insertAt = (0 until parent.childCount).firstOrNull {
             (parent.getChildAt(it) as DefaultMutableTreeNode).userObject is FileNode
         } ?: parent.childCount
@@ -63,13 +76,12 @@ object ChangesTreeBuilder {
         return node
     }
 
-    /** Схлопывает каталоги, у которых ровно один потомок-каталог и нет файлов. */
     private fun collapseChains(node: DefaultMutableTreeNode) {
         for (i in 0 until node.childCount) {
             collapseChains(node.getChildAt(i) as DefaultMutableTreeNode)
         }
         val dir = node.userObject as? DirNode ?: return
-        if (node.parent == null) return // корень не трогаем
+        if (node.parent == null) return
 
         while (node.childCount == 1) {
             val child = node.getChildAt(0) as DefaultMutableTreeNode
@@ -81,7 +93,6 @@ object ChangesTreeBuilder {
         }
     }
 
-    /** Считает по каталогам количество файлов, суммарные +/- и число просмотренных. */
     private fun aggregate(node: DefaultMutableTreeNode, isReviewed: (HgFileItem) -> Boolean): DirNode? {
         val dir = node.userObject as? DirNode ?: return null
         dir.fileCount = 0
@@ -109,7 +120,6 @@ object ChangesTreeBuilder {
         return dir
     }
 
-    /** Все файлы поддерева в порядке отображения. */
     fun filesOf(node: DefaultMutableTreeNode): List<HgFileItem> {
         val result = ArrayList<HgFileItem>()
         collectFiles(node, result)

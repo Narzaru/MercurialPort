@@ -1,8 +1,11 @@
 package com.narzaru.mercurial.changes
 
+import com.narzaru.mercurial.hg.HgFailure
+import com.narzaru.mercurial.hg.HgResult
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -12,14 +15,14 @@ class StatusTextFormatterTest {
     private val base = "default|000111|Базовый коммит"
 
     @Test
-    fun `для незакоммиченных показывается только текущая ревизия`() {
+    fun `uncommitted changes show only the current revision`() {
         val text = StatusTextFormatter.branchInfo(HgDisplayMode.UNCOMMITTED, current, base)
 
         assertEquals("Uncommitted in: feature (a1b2c3) \"Добавил фичу\"", text)
     }
 
     @Test
-    fun `для ветки показывается сравнение с родителем`() {
+    fun `a branch shows the comparison with its parent`() {
         val text = StatusTextFormatter.branchInfo(HgDisplayMode.BRANCH, current, base)
 
         assertEquals(
@@ -29,7 +32,7 @@ class StatusTextFormatterTest {
     }
 
     @Test
-    fun `режим задаёт формулировку сравнения`() {
+    fun `the mode sets the wording of the comparison`() {
         assertTrue(
             StatusTextFormatter.branchInfo(HgDisplayMode.BRANCH, current, base)
                 .contains(" vs Branch point: ")
@@ -41,21 +44,21 @@ class StatusTextFormatterTest {
     }
 
     @Test
-    fun `нераспознанное описание ревизии показывается как есть`() {
+    fun `an unrecognized revision description is shown as is`() {
         val text = StatusTextFormatter.branchInfo(HgDisplayMode.UNCOMMITTED, "мусор", base)
 
         assertEquals("Uncommitted in: мусор", text)
     }
 
     @Test
-    fun `заголовок коммита с вертикальной чертой не обрезается`() {
+    fun `a commit title with a vertical bar is not cut`() {
         val text = StatusTextFormatter.branchInfo(HgDisplayMode.UNCOMMITTED, "b|node|fix a|b", base)
 
         assertEquals("Uncommitted in: b (node) \"fix a|b\"", text)
     }
 
     @Test
-    fun `сводка суммирует плюсы и минусы`() {
+    fun `the summary sums up the added and removed lines`() {
         val files = listOf(
             HgFileItem(status = "M", path = "a.kt", added = 3, removed = 1),
             HgFileItem(status = "M", path = "b.kt", added = 4, removed = 2)
@@ -67,7 +70,7 @@ class StatusTextFormatterTest {
     }
 
     @Test
-    fun `пока статистика считается вместо чисел показывается пометка`() {
+    fun `while the statistics are counted a mark is shown instead of numbers`() {
         val files = listOf(HgFileItem(status = "M", path = "a.kt"))
 
         val text = StatusTextFormatter.summary(files, reviewed = 0, statsPending = true)
@@ -77,8 +80,85 @@ class StatusTextFormatterTest {
     }
 
     @Test
-    fun `пустой список даёт пустую сводку`() {
+    fun `an empty list gives an empty summary`() {
         assertEquals(" ", StatusTextFormatter.summary(emptyList(), reviewed = 0, statsPending = false))
         assertEquals(" ", StatusTextFormatter.summary(emptyList(), reviewed = 0, statsPending = true))
     }
+
+    @Test
+    fun `merge mode says which merged revision the branch is compared against`() {
+        val text = StatusTextFormatter.branchInfo(
+            HgDisplayMode.MERGE, "feature|abc123|work", "default|def456|other work"
+        )
+
+        assertTrue(text.contains("vs Last merged in:"))
+        assertTrue(text.contains("default (def456)"))
+    }
+
+    @Test
+    fun `merge mode reports that nothing of the parent branch was ever merged in`() {
+        val problem = StatusTextFormatter.mergeBaseProblem(
+            "default", "feature|abc123|work", StatusTextFormatter.UNKNOWN_REVISION
+        )
+
+        assertTrue(problem != null && problem.contains("nothing has been merged in"))
+    }
+
+    @Test
+    fun `merge mode reports standing on the parent branch itself`() {
+        val problem = StatusTextFormatter.mergeBaseProblem(
+            "default", "default|abc123|work", "default|abc123|work"
+        )
+
+        assertTrue(problem != null && problem.contains("Uncommitted"))
+    }
+
+    @Test
+    fun `merge mode has no complaint once a merged revision is found`() {
+        assertNull(
+            StatusTextFormatter.mergeBaseProblem(
+                "default", "feature|abc123|work", "default|def456|other work"
+            )
+        )
+    }
+
+    @Test
+    fun `every root branch marker in stderr is recognized`() {
+        for (marker in listOf("revision 0", "unknown revision", "empty revision")) {
+            val text = StatusTextFormatter.statusError(
+                HgDisplayMode.BRANCH, failure("abort: $marker is not usable")
+            )
+
+            assertTrue(marker, text.startsWith("ROOT BRANCH DETECTED (No Parent)."))
+            assertTrue(marker, text.contains("Details: abort: $marker is not usable"))
+        }
+    }
+
+    @Test
+    fun `an unrecognized failure is reported as is`() {
+        val text = StatusTextFormatter.statusError(HgDisplayMode.BRANCH, failure("abort: no such file"))
+
+        assertEquals("${HgFailure.HG_ERROR_PREFIX}: abort: no such file", text)
+    }
+
+    @Test
+    fun `a root branch marker is ignored in a mode without revisions`() {
+        val text = StatusTextFormatter.statusError(
+            HgDisplayMode.UNCOMMITTED, failure("abort: unknown revision")
+        )
+
+        assertEquals("${HgFailure.HG_ERROR_PREFIX}: abort: unknown revision", text)
+    }
+
+    @Test
+    fun `an hg that could not be started is never taken for a root branch`() {
+        val text = StatusTextFormatter.statusError(
+            HgDisplayMode.BRANCH,
+            HgResult(-1, "", "unknown revision", failedToStart = true)
+        )
+
+        assertEquals("${HgFailure.NOT_STARTED_PREFIX}: unknown revision", text)
+    }
+
+    private fun failure(stderr: String) = HgResult(255, "", stderr)
 }

@@ -11,18 +11,17 @@ class HgOutputDecoderTest {
     private fun decode(bytes: ByteArray) = HgOutputDecoder.decode(bytes, cp1251)
 
     @Test
-    fun `корректный UTF-8 декодируется как UTF-8`() {
+    fun `valid UTF-8 is decoded as UTF-8`() {
         assertEquals("привет", decode("привет".toByteArray(Charsets.UTF_8)))
     }
 
     @Test
-    fun `строка в кодировке отката декодируется ею`() {
+    fun `a line in the fallback charset is decoded with it`() {
         assertEquals("привет", decode("привет".toByteArray(cp1251)))
     }
 
     @Test
-    fun `кодировка выбирается для каждой строки отдельно`() {
-        // hg легко смешивает: сообщение коммита в cp1251, а имя файла — в UTF-8.
+    fun `the charset is chosen per line`() {
         val bytes = "утф8".toByteArray(Charsets.UTF_8) +
             '\n'.code.toByte() +
             "ср1251".toByteArray(cp1251)
@@ -31,31 +30,41 @@ class HgOutputDecoderTest {
     }
 
     @Test
-    fun `BOM в начале снимается`() {
+    fun `a leading BOM is dropped`() {
         val bom = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())
 
         assertEquals("текст", decode(bom + "текст".toByteArray(Charsets.UTF_8)))
     }
 
     @Test
-    fun `BOM снимается только в начале вывода`() {
+    fun `a BOM is dropped only at the start of the output`() {
         val bom = "﻿"
 
         assertEquals("a\n$bom", decode("a\n$bom".toByteArray(Charsets.UTF_8)))
     }
 
     @Test
-    fun `CRLF приводится к LF`() {
+    fun `CRLF becomes LF`() {
         assertEquals("a\nb", decode("a\r\nb".toByteArray(Charsets.UTF_8)))
     }
 
     @Test
-    fun `завершающий перевод строки сохраняется`() {
+    fun `a lone carriage return is kept as text`() {
+        assertEquals("a\rb", decode("a\rb".toByteArray(Charsets.UTF_8)))
+    }
+
+    @Test
+    fun `a trailing carriage return is dropped`() {
+        assertEquals("a", decode("a\r".toByteArray(Charsets.UTF_8)))
+    }
+
+    @Test
+    fun `a trailing line separator is kept`() {
         assertEquals("a\n", decode("a\n".toByteArray(Charsets.UTF_8)))
     }
 
     @Test
-    fun `пустой ввод даёт пустую строку`() {
+    fun `empty input gives an empty string`() {
         assertEquals("", decode(ByteArray(0)))
     }
 }

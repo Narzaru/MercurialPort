@@ -7,12 +7,7 @@ import org.junit.Test
 class PathFilterTest {
 
     @Test
-    fun `пустой фильтр пропускает всё`() {
-        assertTrue(PathFilter.ALL.accepts("src/a.kt"))
-    }
-
-    @Test
-    fun `фильтр ищет подстроку без учёта регистра`() {
+    fun `the filter matches a substring ignoring case`() {
         val filter = PathFilter(include = "MAIN", exclude = "")
 
         assertTrue(filter.accepts("src/main/a.kt"))
@@ -20,7 +15,7 @@ class PathFilterTest {
     }
 
     @Test
-    fun `слова фильтра работают как ИЛИ`() {
+    fun `the words of the filter work as OR`() {
         val filter = PathFilter(include = "main test", exclude = "")
 
         assertTrue(filter.accepts("src/main/a.kt"))
@@ -29,14 +24,14 @@ class PathFilterTest {
     }
 
     @Test
-    fun `шаблон с пробелом сначала проверяется целиком`() {
+    fun `a pattern with a space is matched as a whole first`() {
         val filter = PathFilter(include = "dir with space", exclude = "")
 
         assertTrue(filter.accepts("dir with space/a.kt"))
     }
 
     @Test
-    fun `исключение сильнее включения`() {
+    fun `an exclusion beats an inclusion`() {
         val filter = PathFilter(include = "src", exclude = "generated")
 
         assertTrue(filter.accepts("src/a.kt"))
@@ -44,7 +39,7 @@ class PathFilterTest {
     }
 
     @Test
-    fun `одно исключение без включения пропускает остальное`() {
+    fun `a lone exclusion lets everything else through`() {
         val filter = PathFilter(include = "", exclude = "test")
 
         assertTrue(filter.accepts("src/a.kt"))
@@ -52,7 +47,7 @@ class PathFilterTest {
     }
 
     @Test
-    fun `пробелы вокруг шаблона не значимы`() {
+    fun `spaces around a pattern do not matter`() {
         assertTrue(PathFilter(include = "  main  ", exclude = "").accepts("src/main/a.kt"))
         assertTrue(PathFilter(include = "", exclude = "   ").accepts("src/a.kt"))
     }

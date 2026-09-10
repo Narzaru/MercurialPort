@@ -3,6 +3,135 @@
 # Mercurial Port Changelog
 
 ## [Unreleased]
+### Added
+- **`Merge` mode**: compares the branch against the last revision of the parent branch merged
+  into it, rather than against the point the branch started from. Everything the parent branch did
+  up to that merge stands on both sides and never enters the diff, so a branch kept up to date with
+  repeated merges reviews as cleanly as one without them, and a file a merge brought in but the
+  branch never touched is not listed at all. Both sides are real states of the file, so the right
+  side is the file on disk and every IDE feature works in it. The parent branch is named in the
+  field next to the mode.
+- **`Changesets` mode**: shows what the selected changesets did rather than what the branch looks
+  like now. Every file is compared on its own — from the state right before its first change to
+  what those changesets made of it — so work merged in from other branches stays out of the diff.
+  The right side is built from the changesets, not read from disk, so uncommitted edits are not
+  shown and `Undo Changes` is disabled.
+- **Revision strip under the file list** (branch modes, toolbar toggle `Revisions`): the branch's
+  revisions as checkboxes, merges off by default. Unchecking a revision drops its files from the
+  list and moves the comparison base; the choice is kept per branch, `Reset` returns to the
+  default, and the strip's height is dragged with a splitter.
+- **`Ignore line ending changes` option** (settings, on by default): counts `+N −M` with
+  `hg diff --ignore-space-at-eol`, so a file saved with LF instead of CRLF does not read as
+  rewritten whole.
+- **How the `Changesets` diff is built is set in the settings** (`Settings → Tools → Mercurial
+  Port`): whether a fragment the branch touched is shown whole — the way a review server shows it,
+  merged-in lines inside it included — and which engine draws the boundary of that fragment. What
+  the branch itself changed is always found without ignoring anything, so a change of indentation
+  alone never falls out of the diff.
+- **`Open Diff Instead of File` option** (⋮ menu, off by default): a navigation that lands on a file
+  the branch changed leads to that file's diff instead, with the caret's line carried over. Known
+  limitation: the option cannot yet tell where the navigation came from, so it turns every arrival
+  at a changed file into a diff. Leave it off unless that is what you want.
+- **`Jump to Source` switches between a file and its diff both ways.** In the diff of a changed file
+  it opens the file, in a changed file it opens the diff, and the caret's line goes along in either
+  direction, on a tab that is already open as well as on a new one. The key is the one the IDE
+  already uses for `Jump to Source`, and everywhere else that key keeps doing what it always did.
+- **An open diff redraws itself when its file changes**, whether the file was edited in the IDE or
+  outside it, and the TODO list is rescanned along with it. Only the files that changed and already
+  have a diff open are redrawn; the list itself is still reloaded by `Refresh`.
+- **Read-only hg commands go through a command server** (`Settings → Tools → Mercurial Port`, on by
+  default, can be turned off): keeps `hg serve --cmdserver pipe` alive per repository and sends
+  queries to it instead of starting `hg` anew for each one, which is where most of the time of
+  loading a branch used to go. Commands that write are always run on their own, and a query falls
+  back to a plain run whenever a server is unavailable.
+- **`Server processes per repository` option** (settings, one by default): one process answers one
+  query at a time, so queries that would have run side by side queue up on it. Raising the number
+  brings that parallelism back at the price of about 45 MB per process.
+
+### Changed
+- **A click on a file in the list no longer gets lost.** A click that shifts by a pixel counts as a
+  click, and a click on a file inside a multi-file selection opens its diff. Walking the list
+  quickly opens the diff of the file the selection landed on, even when the list rebuilds meanwhile.
+- **The IDE decides how the diff tabs behave.** A diff is now opened the way any other file is, so
+  the preview tab and its settings work on it: with the preview tab on, walking the list reuses one
+  tab, and with it off every diff stays open, exactly as the IDE does elsewhere. The plugin no
+  longer keeps a tab slot of its own and no longer closes tabs behind the user, and the tab is
+  opened without taking the focus away from the list. The file history follows the same rules and
+  reuses the tab of a revision range instead of opening a new one every time.
+- **A failed export is reported.** Files the export could not copy, and a target folder it could not
+  create, are named in the final message instead of silently lowering the copied count. The copying
+  itself now runs in the background, so exporting to a network folder no longer freezes the IDE.
+- **A collapsed folder stays collapsed.** Refreshing the list, changing the filters and marking a
+  file reviewed no longer expand the whole tree again; folders appearing for the first time are
+  still shown expanded, and the first load of a list opens everything as before.
+- **Every mode opens faster.** The branch, the revision list and the revision descriptions a load
+  begins with are now asked of `hg` in parallel instead of one after another, and the `+N −M` counts
+  arriving afterwards update the list in place: the tree is no longer rebuilt and its folders are no
+  longer expanded a second time, so the expansion and the selection stay exactly as they were.
+- **A failed `Undo Changes` is always reported.** A revert that produced no error text — `hg` that
+  could not be started or was terminated — used to end in a silent refresh, as if it had succeeded.
+- **`Show Untracked` is remembered between sessions,** the way the other switches of the ⋮ menu
+  already are.
+- **A stuck `hg` no longer hangs the tool window for good.** A command waiting for input, for a lock
+  or for an unreachable network path used to hold its background thread forever, and a tool window
+  that collected enough of them stopped answering at all. Such a command is now given a limit,
+  terminated once it runs out, and reported as terminated.
+- **A failed `hg` says what failed.** "Mercurial is not installed" and "Mercurial refused the
+  command" used to read the same; they are now told apart in the status line and in the error
+  dialogs, and every failure is written to the IDE log with the command that caused it.
+- **The file history no longer answers with someone else's repository.** Switching files quickly
+  could leave the history pointing at the repository of a file whose loading was already cancelled,
+  and a cancelled request could put its error into the status line instead of the current one.
+- **The `+N −M` counter no longer miscounts.** A changed line that begins the way a diff header does
+  — the `--` of an SQL or Lua comment, for instance — is counted as the change it is, and a binary
+  file no longer contributes a count of its own encoded data.
+- **A repository next to one with a matching name prefix is no longer mistaken for it.** A file from
+  `repo-old` used to be read as a file inside `repo`, showing under a path that does not exist there.
+- **Extending the selection no longer opens anything.** `Shift` with the arrows, and `Ctrl` or
+  `Shift` with a click, used to open the diff of every file the selection passed over; picking files
+  for a group action now leaves the editor alone. A single selected file opens its diff as before.
+- **Open diffs are rebuilt in place when the comparison changes.** Switching the mode or the
+  selected revisions redraws the diffs already open instead of leaving them stale; a file that the
+  new comparison does not touch quietly turns back into a plain editor.
+- **The `Export Open Files to Total Commander` action is gone.** `Export Open Files to Folder` does
+  the copying; opening the folder is left to the file manager of choice.
+- **Options that are not about the file list moved from the ⋮ menu to the settings page**
+  (`Settings → Tools → Mercurial Port`): the status letter in editor tab titles and ignoring line
+  ending changes when counting ±. The ⋮ menu keeps what changes the list itself, plus a shortcut
+  to the settings. Both options return to their defaults once — they are now kept per IDE rather
+  than per project.
+- **A renamed file says where it came from once**: the row carries `← OldName`, and the tooltip no
+  longer repeats it.
+- **Hg File History diffs the selected revisions as one change** — from the parent of the oldest
+  selected revision to the newest. Comparing exactly two selected revisions against each other is
+  gone: the list gave no hint of what was being compared with what.
+- **Reloading the list twice in a row no longer leaves the older answer on screen.** Switching the
+  mode, changing the selected revisions or hitting `Refresh` again started a second load whose
+  result could arrive first and be overwritten by the one it replaced.
+- **The `+N −M` counters always belong to the list they are shown next to.** A reload that ended in
+  an error or in an empty list left the previous counting running, and its numbers landed on the new
+  files, marking some of them as unchanged. The summary line no longer gets stuck on `counting ±…`
+  either, and it is now updated in the `TODO` list as well.
+- **The toolbar stays disabled until every background task is done.** A revert finishing during a
+  reload used to enable the buttons while the reload was still running.
+
+### Removed
+- **The `Show Hg Changes and Hg File History diffs in one tab` option.** How many tabs a diff takes
+  is decided by the IDE and its preview tab now, so there is nothing left to choose.
+- **`Own Changes Only` toggle.** With merges out of the reviewed set and revisions switchable one
+  by one it had nothing left to hide, and it could drop a file whose changes had reached the
+  parent branch by another route.
+
+### Fixed
+- **The `Base` mode no longer drags in whole other branches when the branch contains merges.** The
+  branch's own revisions were looked for by walking away from the branching point, which only
+  holds while the branch was started off its parent branch; branch membership is now read from the
+  revisions themselves.
+- **Renamed files are counted under their new name even when the path has a space in it**: the
+  destination is read from `rename to` / `copy to` instead of the `diff --git` header.
+- **`Show Untracked` works in the `Base` mode.** Untracked files are in no revision, so limiting
+  the list to the branch's files dropped every one of them. In `Changesets` the toggle is hidden —
+  between two revisions there are no untracked files.
 
 ## [1.0.7] - 2026-08-31
 ### Added
@@ -44,9 +173,9 @@
 ## [1.0.6] - 2026-08-20
 ### Fixed
 - **Hg File History loads in seconds, not minutes.** The `hg log` template asked for
-  `{file_copies}`, which makes Mercurial detect copies in every revision — a manifest comparison,
-  ~180 ms per revision. On a file with 1235 revisions the log took **221 s**; the same log without
-  copy detection takes **1.5 s**. The old name is now looked up only where it is actually needed —
+  `{file_copies}`, which makes Mercurial detect copies in every revision — a manifest comparison
+  costing a fraction of a second each, so a long history took minutes. The old name is now looked
+  up only where it is actually needed —
   when `hg cat` does not find the file under its current name — with a single `hg debugrename` per
   rename found, cached for the session. Renames in the diff still resolve; the list no longer pays
   for them on every load.
@@ -113,8 +242,8 @@
 ### Fixed
 - **Branch modes list the branch's own files only — the same set Upsource shows.** Comparing against
   the branching point is right, but everything the parent branch changed before being merged in also
-  differs from that point, and the list turned into 889 files and `+20585 −8168` where the review is
-  89 files and `+6816 −144`. The file set is now taken from the revisions of the branch itself
+  differs from that point, and the list grew by an order of magnitude over what the review holds.
+  The file set is now taken from the revisions of the branch itself
   (`only(., max(ancestors(.) and branch(p1(first(branch(.))))))`) and the status output is filtered by
   it. A merge revision contributes only the files edited while merging, so conflict resolutions stay
   in the list and merely merged-in files stay out. `Branch changes vs parent HEAD` is filtered the
@@ -254,7 +383,7 @@
   shows `+N −M`, and folders aggregate the counts plus a `reviewed/total` badge.
 - The header is compact: an icon toolbar (Refresh / Undo / Clear Reviewed / Files / TODO / Untracked /
   Unchanged / Filter) that wraps instead of clipping, a mode combo box, hideable Filter/Exclude fields,
-  and a single-line branch + summary row (`59 files +3665 −486 · 12/59 reviewed`).
+  and a single-line branch + summary row (`N files +A −R · X/N reviewed`).
 - Exact per-file line counts come from `hg diff --git` (parsed once), which also replaces the previous
   `hg diff --stat` call used to detect files with no real changes.
 - **Hg File History follows the active editor**: the panel is no longer empty until the context-menu

@@ -2,8 +2,8 @@ package com.narzaru.mercurial.history
 
 import com.narzaru.mercurial.diff.HgDiffTabManager
 import com.narzaru.mercurial.hg.HgCommandRunner
+import com.narzaru.mercurial.hg.HgFailure
 import com.narzaru.mercurial.hg.HgLogParser
-import com.narzaru.mercurial.hg.HgOutputDecoder
 import com.narzaru.mercurial.hg.HgPaths
 import com.narzaru.mercurial.hg.HgRenameParser
 import com.narzaru.mercurial.model.HgHistoryItem
@@ -20,13 +20,13 @@ import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileTypes.FileType
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindowManager
@@ -41,6 +41,7 @@ import java.awt.Component
 import java.awt.Point
 import java.awt.event.MouseEvent
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import javax.swing.BoxLayout
 import javax.swing.Icon
 import javax.swing.JComponent
@@ -49,34 +50,23 @@ import javax.swing.JTable
 import javax.swing.ListSelectionModel
 import javax.swing.SwingConstants
 import javax.swing.event.MouseInputAdapter
-import javax.swing.table.AbstractTableModel
 import javax.swing.table.DefaultTableCellRenderer
 
-/**
- * Окно истории файла: `hg log -f`, открытие ревизии, дифф выбранных ревизий.
- */
 class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
 
-    private var targetFile: File? = null
-    private var repoRoot: File? = null
+    private class HistoryTarget(val file: File, val root: File?)
 
-    /**
-     * Открытие/закрытие вкладок нами самими меняет выбор в редакторе. Без этого флага
-     * панель уходила на соседний файл, перезагружала список и сбрасывала выделение —
-     * следующий `Open Diff` уже не находил выбранной ревизии.
-     */
+    @Volatile
+    private var target: HistoryTarget? = null
+
     private var followSuppressed = false
 
-    private val titleLabel = JBLabel("No file selected")
-    private val statusLabel = JBLabel("Ready")
+    private val titleLabel = JBLabel(HistoryStatusText.NO_FILE_SELECTED)
+    private val statusLabel = JBLabel(HistoryStatusText.READY)
     private val tableModel = HistoryTableModel()
     private val table = object : JBTable(tableModel) {
         override fun getToolTipText(event: MouseEvent): String? = tooltipAt(event)
 
-        /**
-         * Подсказка показывается под строкой и от левого края таблицы: колонка сообщения —
-         * крайняя правая, и всплывающая у курсора подсказка уезжала за границу экрана.
-         */
         override fun getToolTipLocation(event: MouseEvent): Point? {
             if (tooltipAt(event) == null) return null
             val row = rowAtPoint(event.point)
@@ -86,23 +76,12 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         }
     }
 
-    /** Быстрые клики по списку: показываем только результат последнего запроса. */
     private var diffRequestId = 0
 
-    /** То же для `hg log`: ответ по прошлому файлу не должен затирать текущий список. */
     private var historyRequestId = 0
 
-    /** Причина последнего неудачного `hg cat` — чтобы показать её вместо молчания. */
-    @Volatile
-    private var lastCatError: String? = null
+    private val renameCache = ConcurrentHashMap<String, String>()
 
-    /**
-     * Ответы `hg debugrename`: ключ «ревизия|путь», значение — старое имя либо пустая строка,
-     * если переименования не было. Спрашивают из фоновых потоков, каждый ответ стоит запуска `hg`.
-     */
-    private val renameCache = java.util.concurrent.ConcurrentHashMap<String, String>()
-
-    /** Гасит череду `hg log` при быстром переключении вкладок редактора. */
     private val followAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
 
     init {
@@ -111,29 +90,21 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         currentEditorPath()?.let { loadHistory(it) }
     }
 
-    override fun dispose() = Unit
-
-    // region Привязка к редактору ---------------------------------------------
+    override fun dispose() {
+        val service = project.service<HgFileHistoryService>()
+        if (service.panel === this) service.panel = null
+        renameCache.clear()
+    }
 
     private fun currentEditorPath(): String? =
         FileEditorManager.getInstance(project).selectedFiles.firstOrNull()
             ?.takeIf { !it.isDirectory }
             ?.let { sourcePathOf(it) }
 
-    /**
-     * Путь файла, историю которого показывает эта вкладка редактора. Дифф-вкладка файлом на
-     * диске не является, но [HgDiffTabManager] помнит, чей дифф в ней открыт: без этого возврат
-     * на вкладку с диффом оставлял в окне историю того файла, куда успели сходить из диффа.
-     * `null` — вкладка чужая (дифф не наш, консоль и прочее), за такой панель не идёт.
-     */
     private fun sourcePathOf(file: VirtualFile): String? =
         if (file.isInLocalFileSystem) file.path
         else project.service<HgDiffTabManager>().sourcePathOf(file)
 
-    /**
-     * Панель сама показывает историю файла, открытого в редакторе: иначе окно
-     * остаётся пустым, пока историю не запросят откуда-то ещё.
-     */
     private fun followActiveEditor() {
         project.messageBus.connect(this).subscribe(
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
@@ -147,77 +118,52 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         )
     }
 
-    /**
-     * Показать историю файла по запросу извне (редактор, выбор в Hg Changes).
-     * Игнорируется, если панель скрыта или уже показывает этот файл.
-     */
     fun syncTo(path: String) = requestHistory(path, fromEditor = false)
 
-    /**
-     * [fromEditor] отделяет слежение за редактором от явного запроса: гасить (см.
-     * [followSuppressed]) можно только первое. Иначе открытие диффа из Hg Changes
-     * подавляло и сам запрос истории — панель переставала реагировать на клики.
-     */
     private fun requestHistory(path: String, fromEditor: Boolean) {
         if (fromEditor && followSuppressed) return
-        // Не дёргаем hg, пока окно скрыто.
         val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)
         if (toolWindow?.isVisible != true) return
         val normalized = File(path).absolutePath
-        if (targetFile?.absolutePath.equals(normalized, ignoreCase = true)) return
+        if (target?.file?.absolutePath.equals(normalized, ignoreCase = true)) return
         if (!fromEditor) {
             loadHistory(path)
             return
         }
-        // По вкладкам редактора ходят насквозь, а каждый `hg log` — это отдельный процесс:
-        // ждём остановки, иначе на промежуточные файлы уходит по запуску Mercurial.
         followAlarm.cancelAllRequests()
         followAlarm.addRequest({ loadHistory(path) }, FOLLOW_DEBOUNCE_MS)
     }
-
-    // endregion
 
     private fun buildUi() {
         val north = JPanel()
         north.layout = BoxLayout(north, BoxLayout.Y_AXIS)
         north.add(buildToolbar())
         north.add(buildInfoRow())
-        // BoxLayout по умолчанию центрирует компоненты разной ширины — как в Hg Changes
-        // выравниваем всё по левому краю, иначе тулбар и подписи «плавают».
         for (i in 0 until north.componentCount) {
             (north.getComponent(i) as? JComponent)?.alignmentX = LEFT_ALIGNMENT
         }
         add(north, BorderLayout.NORTH)
 
         table.selectionModel.selectionMode = ListSelectionModel.MULTIPLE_INTERVAL_SELECTION
-        // Любой клик по строке — дифф. Двойной здесь не задействован: открытие самой ревизии
-        // файла интереса не представляет, а второй клик иначе показывал бы тот же дифф.
         table.addMouseListener(object : MouseInputAdapter() {
-            override fun mouseClicked(e: java.awt.event.MouseEvent) {
-                if (e.button != java.awt.event.MouseEvent.BUTTON1) return
+            override fun mouseClicked(e: MouseEvent) {
+                if (e.button != MouseEvent.BUTTON1) return
                 if (table.rowAtPoint(e.point) < 0) return
                 if (e.clickCount == 1) diffSelected()
             }
         })
         configureDateColumn()
-        // Штатная «раскрывашка» JBTable дорисовывает хвост ячейки вправо одной строкой — у крайней
-        // правой колонки сообщения он уходит за экран. Вместо неё — свой тултип с переносом.
         table.setExpandableItemsEnabled(false)
         add(JBScrollPane(table), BorderLayout.CENTER)
     }
 
-    /**
-     * Подсказка по ячейке под курсором: полная дата и, если текст не поместился в колонку,
-     * его полный текст — длинный переносится по словам, короткий остаётся строкой по себе.
-     */
     private fun tooltipAt(event: MouseEvent): String? {
-        val row = table.rowAtPoint(event.point)
+        val viewRow = table.rowAtPoint(event.point)
         val viewColumn = table.columnAtPoint(event.point)
-        if (row < 0 || viewColumn < 0) return null
+        if (viewRow < 0 || viewColumn < 0) return null
         val modelColumn = table.convertColumnIndexToModel(viewColumn)
 
-        val raw = tableModel.getValueAt(row, modelColumn).toString()
-        // У даты в колонке только день, поэтому подсказка нужна независимо от ширины.
+        val raw = tableModel.getValueAt(table.convertRowIndexToModel(viewRow), modelColumn).toString()
         if (modelColumn == HistoryTableModel.COL_DATE) return tooltipFor(HistoryDateText.full(raw).orEmpty())
         if (!isTruncated(raw, viewColumn)) return null
         return tooltipFor(raw)
@@ -226,16 +172,11 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
     private fun tooltipFor(text: String): String? =
         HistoryTooltipText.wrapped(text, JBUI.scale(TOOLTIP_WIDTH), textWidth(text))
 
-    /** Помещается ли текст в колонку: тултип-дубликат на каждой строке только мешает. */
     private fun isTruncated(text: String, viewColumn: Int): Boolean =
         textWidth(text) > table.columnModel.getColumn(viewColumn).width - JBUI.scale(CELL_PADDING)
 
     private fun textWidth(text: String): Int = table.getFontMetrics(table.font).stringWidth(text)
 
-    /**
-     * Дата: в колонке — только день, время и часовой пояс уходят в тултип. Колонка от этого
-     * заметно уже, а место нужно колонке сообщения.
-     */
     private fun configureDateColumn() {
         val column = table.columnModel.getColumn(HistoryTableModel.COL_DATE)
         column.cellRenderer = object : DefaultTableCellRenderer() {
@@ -247,8 +188,6 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
                 super.getTableCellRendererComponent(
                     table, HistoryDateText.day(raw), isSelected, hasFocus, row, column
                 )
-                // Полное значение отдаёт tooltipAt: подсказки таблицы собраны в одном месте,
-                // чтобы все они были одинаковыми блоками с переносом.
                 return this
             }
         }
@@ -256,16 +195,16 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         column.maxWidth = JBUI.scale(DATE_COLUMN_MAX_WIDTH)
     }
 
-    /** Тулбар в стиле Hg Changes: компактные иконки вместо ряда подписанных кнопок. */
     private fun buildToolbar(): JComponent {
         val group = DefaultActionGroup()
         group.add(action("Refresh", "Reload the file history", AllIcons.Actions.Refresh,
-            { targetFile != null }) { reload() })
+            { target != null }) { reload() })
         group.add(Separator.getInstance())
-        // Дифф по одинарному клику — основной путь (контракт UI), но выделить две ревизии
-        // можно и с клавиатуры (Shift+стрелки), поэтому действие оставлено и в тулбаре.
-        group.add(action("Show Diff", "Diff the selected revision (or two revisions against each other)",
-            AllIcons.Actions.Diff, { table.selectedRowCount in 1..2 }) { diffSelected() })
+        group.add(action(
+            "Show Diff",
+            "Diff the selected revisions as one change: from the parent of the oldest to the newest",
+            AllIcons.Actions.Diff, { table.selectedRowCount > 0 }
+        ) { diffSelected() })
         group.add(action("Open", "Open the selected revision of the file as a temporary copy",
             AllIcons.Actions.OpenNewTab, { table.selectedRowCount > 0 }) { openSelected() })
 
@@ -275,7 +214,6 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         return toolbar.component
     }
 
-    /** Заголовок и статус — одной компактной строкой, как сводка в Hg Changes. */
     private fun buildInfoRow(): JPanel {
         val row = JPanel(BorderLayout(8, 0))
         row.border = JBUI.Borders.empty(2, 4, 3, 4)
@@ -302,192 +240,138 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         override fun getActionUpdateThread() = ActionUpdateThread.EDT
     }
 
-    fun loadHistory(path: String) {
-        targetFile = File(path)
-        titleLabel.text = "History: ${targetFile!!.name}"
+    private fun loadHistory(path: String) {
+        val file = File(path)
+        target = HistoryTarget(file, null)
+        titleLabel.text = HistoryStatusText.title(file.name)
         reload()
     }
 
     private fun reload() {
-        val file = targetFile ?: return
-        statusLabel.text = "Loading history..."
-        // Список не очищаем: старые строки живут до прихода новых, иначе панель моргает
-        // на каждой перезагрузке. Устаревшие ответы отсекаем счётчиком поколений.
+        val file = target?.file ?: return
+        statusLabel.text = HistoryStatusText.LOADING
         val requestId = ++historyRequestId
         ApplicationManager.getApplication().executeOnPooledThread {
             val root = HgCommandRunner.findRepoRoot(file.parentFile)
             if (root == null) {
                 onEdt {
                     if (requestId != historyRequestId) return@onEdt
-                    statusLabel.text = "No repository found."
+                    statusLabel.text = HistoryStatusText.NO_REPOSITORY
                     tableModel.setItems(emptyList())
                 }
                 return@executeOnPooledThread
             }
-            repoRoot = root
             val rel = HgPaths.relativize(file, root)
             val runner = HgCommandRunner(root)
             val res = runner.run("log", "-f", rel, "--template", "${HgLogParser.TEMPLATE}\n")
             val items = if (res.success) HgLogParser.parse(res.stdout, rel) else emptyList()
             onEdt {
-                if (requestId != historyRequestId) return@onEdt // пришёл более свежий запрос
+                if (requestId != historyRequestId) return@onEdt
+                target = HistoryTarget(file, root)
                 if (!res.success && items.isEmpty()) {
                     tableModel.setItems(emptyList())
-                    statusLabel.text = "HG Error: ${res.stderr.trim()}"
+                    statusLabel.text = HistoryStatusText.hgError(res.stderr, res.failedToStart)
                 } else {
                     tableModel.setItems(items)
-                    statusLabel.text = "Loaded ${items.size} commits."
+                    statusLabel.text = HistoryStatusText.loaded(items.size)
                 }
             }
         }
     }
 
-    private fun selectedItems(): List<HgHistoryItem> =
-        table.selectedRows.toList().mapNotNull { tableModel.itemAt(it) }
+    private fun selectedModelRows(): List<Int> =
+        table.selectedRows.map { table.convertRowIndexToModel(it) }
 
     private fun openSelected() {
-        val item = selectedItems().firstOrNull() ?: return
-        val root = repoRoot ?: return
-        val file = targetFile ?: return
-        val rel = item.path.ifBlank { HgPaths.relativize(file, root) }
+        val current = target ?: return
+        val root = current.root ?: return
+        val item = selectedModelRows().firstNotNullOfOrNull { tableModel.itemAt(it) } ?: return
+        val rel = item.path.ifBlank { HgPaths.relativize(current.file, root) }
         ApplicationManager.getApplication().executeOnPooledThread {
             val tmp = extractFile(root, rel, item, "open") ?: return@executeOnPooledThread
             onEdt {
                 val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(tmp) ?: return@onEdt
-                // Извлечённая копия лежит во временном каталоге и репозитория не имеет —
-                // панель не должна переключаться на неё.
                 withoutFollow { FileEditorManager.getInstance(project).openFile(vf, true) }
             }
         }
     }
 
     private fun diffSelected() {
-        val root = repoRoot ?: return
-        val file = targetFile ?: return
-        val selected = selectedItems()
-        if (selected.isEmpty()) return
-        if (selected.size > 2) {
-            Messages.showWarningDialog(project, "Select one or two revisions to compare.", "Hg Diff")
-            return
-        }
+        val current = target ?: return
+        val root = current.root ?: return
+        val file = current.file
+        val items = tableModel.items()
+        val revisions = items.map { it.revision }
+        val selection = HistoryDiffSelection.of(items, selectedModelRows()) ?: return
 
         val requestId = ++diffRequestId
-        lastCatError = null
         ApplicationManager.getApplication().executeOnPooledThread {
             val fileType = FileTypeManager.getInstance().getFileTypeByFileName(file.name)
-            var leftContent: String? = null
-            var rightContent: String? = null
-            var leftLabel: String
-            val rightLabel: String
-            val key: String
+            var catError: String? = null
+            val trail = HistoryRenameTrail(
+                revisionsBelow = { fromRow -> revisions.take(fromRow + 1).reversed() },
+                renameSourceOf = { revision, path -> renameSource(root, revision, path) }
+            )
 
-            if (selected.size == 2) {
-                val idx1 = tableModel.indexOf(selected[0])
-                val idx2 = tableModel.indexOf(selected[1])
-                val newer = if (idx1 < idx2) selected[0] else selected[1]
-                val older = if (idx1 < idx2) selected[1] else selected[0]
-                val newerRow = minOf(idx1, idx2)
-                val olderRow = maxOf(idx1, idx2)
-                leftContent = catFollowingRenames(root, older.path, older.revision, olderRow).text
-                rightContent = catFollowingRenames(root, newer.path, newer.revision, newerRow).text
-                leftLabel = revLabel(older)
-                rightLabel = revLabel(newer)
-                key = "sel|${older.revision}|${newer.revision}"
-            } else {
-                // Одна ревизия — показываем, что изменила она сама: сравниваем с её первым
-                // родителем, а не со следующей строкой списка (при слияниях это разные
-                // ревизии). Имя у родителя может быть старым — его ищет catFollowingRenames.
-                val item = selected[0]
-                val row = tableModel.indexOf(item)
-                val parent = item.parentRev.toIntOrNull() ?: -1
-                val right = catFollowingRenames(root, item.path, item.revision, row)
-                val left = if (parent < 0) Extracted(null, right.path)
-                else catFollowingRenames(root, right.path, item.parentRev, row)
-                leftContent = left.text
-                rightContent = right.text
-                leftLabel = if (parent < 0) "No parent revision" else "Rev ${item.parentRev} (parent)"
-                rightLabel = revLabel(item)
-                if (left.path != right.path) {
-                    leftLabel += " — ${left.path.substringAfterLast('/')}"
-                }
-                key = "prev|${item.revision}|${item.path}"
+            val right = trail.follow(selection.newest.path, selection.newestRow) { path ->
+                catText(root, path, selection.newest.revision) { catError = it }
             }
+            val left =
+                if (!selection.hasParent) HistoryRenameTrail.Found(null, right.path)
+                else trail.follow(selection.oldest.path, selection.oldestRow) { path ->
+                    catText(root, path, selection.parentRevision) { catError = it }
+                }
+
+            val leftLabel = selection.leftLabel(left.path, right.path)
+            val rightLabel = selection.rightLabel()
+            val key = selection.tabKey(right.path)
+            val error = catError
 
             onEdt {
-                if (requestId != diffRequestId) return@onEdt // пришёл более свежий клик
-                // Иначе падение при открытии вкладки выглядит как «ничего не произошло».
+                if (requestId != diffRequestId) return@onEdt
                 try {
-                    showDiff(file, fileType, leftContent, rightContent, leftLabel, rightLabel, key)
+                    showDiff(file, fileType, left.text, right.text, leftLabel, rightLabel, key, error)
                 } catch (e: Exception) {
                     LOG.warn("Could not open the diff ($key)", e)
-                    statusLabel.text = "Diff error: ${e.message ?: e.javaClass.simpleName}"
+                    statusLabel.text = HistoryStatusText.diffError(e.message ?: e.javaClass.simpleName)
                 }
             }
         }
     }
-
-    private fun revLabel(item: HgHistoryItem) = "Rev ${item.revision} (${item.author})"
 
     private fun showDiff(
         file: File, fileType: FileType,
         leftContent: String?, rightContent: String?,
-        leftLabel: String, rightLabel: String, key: String
+        leftLabel: String, rightLabel: String, key: String, catError: String?
     ) {
         val factory = DiffContentFactory.getInstance()
-        val hasRight = rightContent != null
-        if (leftContent == null && !hasRight) {
-            statusLabel.text = lastCatError?.let { "Hg Error: $it" } ?: "Nothing to compare for this revision."
+        if (leftContent == null && rightContent == null) {
+            statusLabel.text = HistoryStatusText.nothingToCompare(catError)
             return
         }
 
-        // Появление/удаление файла — это пустая сторона, а не ошибка. В отличие от Hg Changes
-        // берём пустой документ, а не createEmpty(): с EmptyContent вкладка для init-коммита
-        // (у ревизии нет родителя, слева пусто) не открывалась вовсе.
-        val left = factory.create(project, leftContent.orEmpty(), fileType)
-        val right = factory.create(project, rightContent.orEmpty(), fileType)
-        val leftTitle = if (leftContent == null) "$leftLabel — file added" else leftLabel
-        val rightTitle = if (!hasRight) "$rightLabel — file deleted" else rightLabel
-        statusLabel.text = "$leftTitle → $rightTitle"
+        val vf = LocalFileSystem.getInstance().findFileByIoFile(file)
+        val left = revisionContent(factory, leftContent.orEmpty(), vf, fileType)
+        val right = revisionContent(factory, rightContent.orEmpty(), vf, fileType)
+        val titles = HistoryStatusText.diffTitles(
+            leftLabel, rightLabel,
+            hasLeftContent = leftContent != null,
+            hasRightContent = rightContent != null
+        )
+        statusLabel.text = titles.status
 
-        // Вкладками владеет общий менеджер: иначе Hg Changes и это окно держат каждое свою,
-        // и на экране оказывается два диффа сразу.
-        val request = SimpleDiffRequest(file.name, left, right, leftTitle, rightTitle)
+        val request = SimpleDiffRequest(file.name, left, right, titles.left, titles.right)
         project.service<HgDiffTabManager>()
-            .show(HgDiffTabManager.OWNER_HISTORY, key, file.name, request, table, file.path)
+            .show(key, file.name, request, table, file.path)
     }
 
-    /** Содержимое файла в ревизии и имя, под которым его удалось прочитать. */
-    private class Extracted(val text: String?, val path: String)
+    private fun revisionContent(
+        factory: DiffContentFactory,
+        text: String,
+        file: VirtualFile?,
+        fileType: FileType
+    ) = if (file != null) factory.create(project, text, file) else factory.create(project, text, fileType)
 
-    /**
-     * Читает файл в ревизии, доискиваясь старого имени. `hg log` копий не считает — это минуты
-     * на длинной истории (см. [HgLogParser]), — поэтому переименование ищется только там, где
-     * оно действительно мешает: `hg cat` под текущим именем не нашёл файла.
-     *
-     * Ревизии просматриваются от [fromRow] к более новым: переименование, записанное в ревизии R,
-     * означает, что все её предки знали файл под старым именем. Число запросов ограничено —
-     * каждый стоит запуска `hg`, а история переименований длиной в десяток файлов не встречается.
-     */
-    private fun catFollowingRenames(root: File, path: String, rev: String, fromRow: Int): Extracted {
-        var current = path
-        catText(root, current, rev)?.let { return Extracted(it, current) }
-
-        var row = fromRow
-        var lookups = 0
-        while (row >= 0 && lookups < RENAME_LOOKUPS) {
-            val at = tableModel.itemAt(row)?.revision ?: break
-            lookups++
-            val source = renameSource(root, at, current)
-            if (source != null && !source.equals(current, ignoreCase = true)) {
-                current = source
-                catText(root, current, rev)?.let { return Extracted(it, current) }
-            }
-            row--
-        }
-        return Extracted(null, current)
-    }
-
-    /** Старое имя [path] в ревизии [rev] или `null`. Ответ кэшируется: он стоит запуска `hg`. */
     private fun renameSource(root: File, rev: String, path: String): String? {
         val key = "$rev|${HgPaths.key(path)}"
         renameCache[key]?.let { return it.ifEmpty { null } }
@@ -497,29 +381,27 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         return source
     }
 
-    private fun catText(root: File, rel: String, rev: String): String? {
-        val res = HgCommandRunner(root).runToBytesDetailed(listOf("cat", "-r", rev, rel))
-        if (res.exitCode == 0) return HgOutputDecoder.decode(res.stdout)
-        // Отказ `hg cat` раньше был неотличим от «файла не было в ревизии» — запоминаем причину.
-        lastCatError = res.stderr.trim().ifBlank { "hg cat -r $rev $rel: exit ${res.exitCode}" }
-        LOG.warn("hg cat -r $rev $rel failed: $lastCatError")
+    private fun catText(root: File, rel: String, rev: String, onError: (String) -> Unit): String? {
+        val res = HgCommandRunner(root).runToText(listOf("cat", "-r", rev, rel))
+        if (res.success) return res.stdout
+        val error = res.stderr.trim().ifBlank { "hg cat -r $rev $rel: exit ${res.exitCode}" }
+        onError(error)
+        LOG.warn("hg cat -r $rev $rel failed: $error")
         return null
     }
 
     private fun extractFile(root: File, rel: String, item: HgHistoryItem, prefix: String): File? {
-        val name = File(rel).name
-        val dot = name.lastIndexOf('.')
-        val base = if (dot >= 0) name.substring(0, dot) else name
-        val ext = if (dot >= 0) name.substring(dot) else ""
-        val safe = { s: String -> s.replace(Regex("[^A-Za-z0-9._-]"), "_") }
         val tmp = File(
             System.getProperty("java.io.tmpdir"),
-            "${safe(base)}_${prefix}_rev${item.revision}_${safe(item.author)}$ext"
+            HistoryTempFileName.of(rel, prefix, item.revision, item.author)
         )
-        val (exit, bytes) = HgCommandRunner(root).runToBytes(listOf("cat", "-r", item.revision, rel))
-        if (exit != 0) return null
+        val res = HgCommandRunner(root).runToBytesDetailed(listOf("cat", "-r", item.revision, rel))
+        if (res.exitCode != 0) {
+            LOG.warn("hg cat -r ${item.revision} $rel failed: ${HgFailure.message(res.failedToStart, res.stderr)}")
+            return null
+        }
         return try {
-            tmp.writeBytes(bytes)
+            tmp.writeBytes(res.stdout)
             tmp
         } catch (_: Exception) {
             null
@@ -528,13 +410,11 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
 
     private fun onEdt(task: () -> Unit) = ApplicationManager.getApplication().invokeLater(task)
 
-    /** Выполняет операции с вкладками редактора, не давая панели уйти за сменой выбора. */
     fun withoutFollow(block: () -> Unit) {
         followSuppressed = true
         try {
             block()
         } finally {
-            // Снимаем флаг после того, как разойдутся события выбора вкладок.
             onEdt { followSuppressed = false }
         }
     }
@@ -542,54 +422,15 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
     private companion object {
         const val TOOL_WINDOW_ID = "Hg File History"
 
-        /** Пауза перед `hg log` при переходе по вкладкам редактора. */
         const val FOLLOW_DEBOUNCE_MS = 300
 
-        /** Сколько ревизий опросить в поисках старого имени: каждая — отдельный запуск `hg`. */
-        const val RENAME_LOOKUPS = 8
-
-        /** Ширины колонки даты: в ней остался только день. */
         const val DATE_COLUMN_WIDTH = 80
         const val DATE_COLUMN_MAX_WIDTH = 110
 
-        /** Ширина тултипа: по ней HTML переносит текст по словам. */
         const val TOOLTIP_WIDTH = 420
 
-        /** Отступы ячейки, на которые текст короче ширины колонки. */
         const val CELL_PADDING = 8
 
-        val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(HgFileHistoryPanel::class.java)
-    }
-
-    private class HistoryTableModel : AbstractTableModel() {
-        private val columns = arrayOf("Rev", "Node", "Date", "Author", "Message")
-        private var rows: List<HgHistoryItem> = emptyList()
-
-        fun setItems(items: List<HgHistoryItem>) {
-            rows = items
-            fireTableDataChanged()
-        }
-
-        companion object {
-            const val COL_DATE = 2
-        }
-
-        fun itemAt(row: Int): HgHistoryItem? = rows.getOrNull(row)
-        fun indexOf(item: HgHistoryItem): Int = rows.indexOf(item)
-
-        override fun getRowCount() = rows.size
-        override fun getColumnCount() = columns.size
-        override fun getColumnName(column: Int) = columns[column]
-        override fun isCellEditable(rowIndex: Int, columnIndex: Int) = false
-        override fun getValueAt(rowIndex: Int, columnIndex: Int): Any {
-            val item = rows[rowIndex]
-            return when (columnIndex) {
-                0 -> item.revision
-                1 -> item.node
-                2 -> item.date
-                3 -> item.author
-                else -> item.message
-            }
-        }
+        val LOG = Logger.getInstance(HgFileHistoryPanel::class.java)
     }
 }

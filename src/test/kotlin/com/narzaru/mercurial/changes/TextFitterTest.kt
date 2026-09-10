@@ -7,13 +7,12 @@ import org.junit.Test
 
 class TextFitterTest {
 
-    /** Моноширинный «шрифт»: один символ — одна условная единица ширины. */
     private val monospace: (String) -> Int = { it.length }
 
     private fun fit(text: String, budget: Int) = TextFitter.fit(text, budget, monospace)
 
     @Test
-    fun `текст по размеру остаётся целым`() {
+    fun `a text that fits stays whole`() {
         val fitted = fit("abcdef", budget = 6)
 
         assertEquals("abcdef", fitted.text)
@@ -21,7 +20,7 @@ class TextFitterTest {
     }
 
     @Test
-    fun `длинный текст обрезается с многоточием`() {
+    fun `a long text is cut with an ellipsis`() {
         val fitted = fit("abcdefghij", budget = 5)
 
         assertEquals("abcd…", fitted.text)
@@ -30,7 +29,7 @@ class TextFitterTest {
     }
 
     @Test
-    fun `обрезанный текст не шире бюджета`() {
+    fun `a cut text is not wider than the budget`() {
         for (budget in 2..12) {
             val fitted = fit("abcdefghijklmnop", budget)
 
@@ -39,15 +38,14 @@ class TextFitterTest {
     }
 
     @Test
-    fun `нулевой и отрицательный бюджет оставляют текст как есть`() {
-        // Ширина колонки ещё неизвестна — обрезать наугад хуже, чем показать целиком.
+    fun `a zero or negative budget leaves the text as is`() {
         assertEquals("abc", fit("abc", budget = 0).text)
         assertFalse(fit("abc", budget = 0).truncated)
         assertEquals("abc", fit("abc", budget = -10).text)
     }
 
     @Test
-    fun `пустой текст не ломается`() {
+    fun `an empty text does not break`() {
         assertEquals("", fit("", budget = 5).text)
     }
 }

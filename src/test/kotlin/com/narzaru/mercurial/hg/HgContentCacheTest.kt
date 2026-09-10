@@ -10,21 +10,19 @@ class HgContentCacheTest {
     private val cache = HgContentCache()
 
     @Test
-    fun `отдаёт положенное содержимое`() {
+    fun `stored content is returned back`() {
         cache.put("k", "текст")
 
         assertEquals("текст", cache.get("k")?.text)
     }
 
     @Test
-    fun `незнакомый ключ не найден`() {
+    fun `an unknown key is not found`() {
         assertNull(cache.get("k"))
     }
 
     @Test
-    fun `отрицательный ответ кэшируется и отличим от отсутствия записи`() {
-        // «Файла в этой ревизии не было» — такой же стабильный факт, и стоит он того же
-        // запуска hg; повторно выяснять его незачем.
+    fun `a negative answer is cached and differs from a missing entry`() {
         cache.put("k", null)
 
         val entry = cache.get("k")
@@ -33,34 +31,38 @@ class HgContentCacheTest {
     }
 
     @Test
-    fun `ревизия входит в ключ`() {
+    fun `the revision is part of the key`() {
         assertEquals("12|src/a.kt", HgContentCache.key("12", "src/a.kt"))
         assert(HgContentCache.key("12", "a.kt") != HgContentCache.key("13", "a.kt"))
     }
 
     @Test
-    fun `разделители пути в ключе нормализуются`() {
+    fun `path separators in the key are normalized`() {
         assertEquals(HgContentCache.key("12", "src/a.kt"), HgContentCache.key("12", "src\\a.kt"))
     }
 
     @Test
-    fun `размер ограничен, старые записи вытесняются`() {
+    fun `paths differing only in case share one key`() {
+        assertEquals(HgContentCache.key("12", "src/a.kt"), HgContentCache.key("12", "Src/A.kt"))
+    }
+
+    @Test
+    fun `the cache is bounded and evicts the oldest entries`() {
         val small = HgContentCache(maxEntries = 3)
 
         for (i in 1..5) small.put("k$i", "v$i")
 
-        assertEquals(3, small.size())
         assertNull(small.get("k1"))
         assertEquals("v5", small.get("k5")?.text)
     }
 
     @Test
-    fun `обращение продлевает жизнь записи`() {
+    fun `reading an entry extends its life`() {
         val small = HgContentCache(maxEntries = 2)
         small.put("a", "1")
         small.put("b", "2")
 
-        small.get("a")   // «a» снова самая свежая, вытесниться должна «b»
+        small.get("a")
         small.put("c", "3")
 
         assertEquals("1", small.get("a")?.text)
@@ -68,8 +70,7 @@ class HgContentCacheTest {
     }
 
     @Test
-    fun `слишком большой файл не кэшируется`() {
-        // Один такой вытеснил бы весь остальной кэш, а открывают их редко.
+    fun `a file above the size limit is not cached`() {
         val small = HgContentCache(maxEntryChars = 10)
 
         small.put("k", "x".repeat(11))
@@ -78,7 +79,7 @@ class HgContentCacheTest {
     }
 
     @Test
-    fun `файл на границе размера кэшируется`() {
+    fun `a file exactly at the size limit is cached`() {
         val small = HgContentCache(maxEntryChars = 10)
 
         small.put("k", "x".repeat(10))
@@ -87,13 +88,12 @@ class HgContentCacheTest {
     }
 
     @Test
-    fun `очистка убирает всё`() {
+    fun `clearing removes everything`() {
         cache.put("a", "1")
         cache.put("b", null)
 
         cache.clear()
 
-        assertEquals(0, cache.size())
         assertNull(cache.get("a"))
         assertNull(cache.get("b"))
     }

@@ -2,10 +2,6 @@ package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.model.HgFileItem
 
-/**
- * Ищет TODO-комментарии в тексте файла:
- * учитывает как строчные (//), так и блочные (/* */) комментарии.
- */
 object TodoParser {
 
     private const val TODO = "todo"
@@ -13,16 +9,11 @@ object TodoParser {
     private const val BLOCK_OPEN = "/*"
     private const val BLOCK_CLOSE = "*/"
 
-    /** Записан escape-последовательностью намеренно: голый символ в коде неотличим от пробела. */
     private const val NUL = '\u0000'
 
     fun parse(source: HgFileItem, text: String): List<HgFileItem> {
         val result = ArrayList<HgFileItem>()
-        // Нулевой байт — признак бинарного файла: комментариев в нём нет, а «строк»
-        // из мегабайтного .dll получатся десятки тысяч.
         if (text.contains(NUL)) return result
-        // Разбирать построчно есть смысл, только если слово вообще встречается в файле:
-        // TODO-режим перечитывает все изменённые файлы по таймеру.
         if (!text.contains(TODO, ignoreCase = true)) return result
 
         val lines = text.split("\r\n", "\n", "\r")
@@ -47,7 +38,6 @@ object TodoParser {
         return result
     }
 
-    /** @return (найден ли TODO в комментарии на этой строке, актуальное состояние inBlockComment). */
     private fun containsTodoInComment(line: String, blockCommentState: Boolean): Pair<Boolean, Boolean> {
         var inBlockComment = blockCommentState
         var position = 0
@@ -69,8 +59,6 @@ object TodoParser {
             val lineComment = line.indexOf(LINE_COMMENT, position)
             val blockComment = line.indexOf(BLOCK_OPEN, position)
 
-            // Что началось раньше, то и определяет тип комментария: `/* … // … */`
-            // и `// … /* …` разбираются по-разному.
             if (lineComment >= 0 && (blockComment < 0 || lineComment < blockComment)) {
                 val found = line.indexOf(TODO, lineComment + LINE_COMMENT.length, ignoreCase = true) >= 0
                 return found to inBlockComment
@@ -83,7 +71,6 @@ object TodoParser {
         return false to inBlockComment
     }
 
-    /** Оставляет от строки сам текст задачи: `// TODO: убрать хак` → `убрать хак`. */
     private fun formatTodoText(line: String): String {
         var original = line.trim()
         val todoIndex = original.indexOf(TODO, ignoreCase = true)
@@ -94,7 +81,6 @@ object TodoParser {
             if (commentStart > 0) original = original.substring(commentStart).trim()
         }
 
-        // `*` и `/` — продолжение блочного комментария в несколько строк.
         for (prefix in arrayOf(LINE_COMMENT, BLOCK_OPEN, "*", "/")) {
             if (!original.startsWith(prefix)) continue
             var remainder = original.substring(prefix.length).trimStart()

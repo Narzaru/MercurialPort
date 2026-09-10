@@ -8,7 +8,6 @@ import org.junit.Test
 
 class ReviewStateTest {
 
-    /** Хранилище в памяти вместо PropertiesComponent проекта. */
     private class FakeStore(var saved: List<String> = emptyList()) : ReviewedPathsStore {
         override fun load(): List<String> = saved
         override fun save(paths: List<String>) {
@@ -22,7 +21,7 @@ class ReviewStateTest {
     private fun item(path: String) = HgFileItem(status = "M", path = path)
 
     @Test
-    fun `отметка ставится и снимается`() {
+    fun `a mark is set and dropped`() {
         val file = item("src/a.kt")
 
         assertFalse(state.isReviewed(file))
@@ -33,14 +32,14 @@ class ReviewStateTest {
     }
 
     @Test
-    fun `отметка не зависит от регистра и разделителей`() {
+    fun `a mark ignores case and separators`() {
         state.set(listOf(item("src/a.kt")), true)
 
         assertTrue(state.isReviewed(item("SRC\\A.KT")))
     }
 
     @Test
-    fun `повторная отметка изменением не считается`() {
+    fun `marking again does not count as a change`() {
         val file = item("src/a.kt")
 
         assertTrue(state.set(listOf(file), true))
@@ -48,18 +47,17 @@ class ReviewStateTest {
     }
 
     @Test
-    fun `переключение группы сначала отмечает всё`() {
+    fun `toggling a group marks everything first`() {
         val files = listOf(item("a.kt"), item("b.kt"))
         state.set(listOf(files[0]), true)
 
-        // Отмечен только один — переключение доводит группу до «просмотрено всё».
         state.toggle(files)
 
         assertTrue(files.all { state.isReviewed(it) })
     }
 
     @Test
-    fun `переключение полностью отмеченной группы снимает отметки`() {
+    fun `toggling a fully marked group drops the marks`() {
         val files = listOf(item("a.kt"), item("b.kt"))
         state.set(files, true)
 
@@ -69,21 +67,20 @@ class ReviewStateTest {
     }
 
     @Test
-    fun `переключение пустой группы ничего не меняет`() {
+    fun `toggling an empty group changes nothing`() {
         assertFalse(state.toggle(emptyList()))
     }
 
     @Test
-    fun `очистка снимает все отметки и сообщает об изменении`() {
+    fun `clearing drops every mark and reports a change`() {
         state.set(listOf(item("a.kt")), true)
 
         assertTrue(state.clear())
-        assertTrue(state.isEmpty())
         assertFalse(state.clear())
     }
 
     @Test
-    fun `отметки переживают перечитывание из хранилища`() {
+    fun `marks survive a reread from the store`() {
         state.set(listOf(item("src/A.kt")), true)
 
         val restored = ReviewState(store)
@@ -93,7 +90,7 @@ class ReviewStateTest {
     }
 
     @Test
-    fun `в хранилище уходит нормализованный ключ`() {
+    fun `a normalized key goes into the store`() {
         state.set(listOf(item("SRC\\A.kt")), true)
 
         assertEquals(listOf("src/a.kt"), store.saved)

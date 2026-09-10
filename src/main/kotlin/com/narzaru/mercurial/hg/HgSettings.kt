@@ -1,47 +1,82 @@
 package com.narzaru.mercurial.hg
 
 import com.intellij.ide.util.PropertiesComponent
+import com.intellij.openapi.application.ApplicationManager
+import com.narzaru.mercurial.model.ChangesetsFragments
 import java.nio.charset.Charset
 
-/**
- * Настройки плагина уровня приложения.
- *
- * Главная из них — кодировка, которой декодируется вывод `hg`, если он не является
- * корректным UTF-8: сообщения коммитов часто набраны в системной кодировке (cp1251),
- * а `Charset.defaultCharset()` в современных JDK — это UTF-8, из-за чего кириллица
- * превращалась в «вопросики».
- */
 object HgSettings {
 
     private const val ENCODING_KEY = "mercurial.fallbackEncoding"
-    private const val SHARED_DIFF_TAB_KEY = "mercurial.sharedDiffTab"
+    private const val WIDEN_KEY = "mercurial.changesetsWiden"
+    private const val FRAGMENTS_KEY = "mercurial.changesetsFragments"
+    private const val IGNORE_EOL_KEY = "mercurial.ignoreEolChanges"
+    private const val STATUS_IN_TABS_KEY = "mercurial.statusInTabs"
+    private const val COMMAND_SERVER_KEY = "mercurial.commandServer"
+    private const val COMMAND_SERVER_COUNT_KEY = "mercurial.commandServerCount"
 
-    /** Кодировки, которые предлагаем в настройках; список открытый — можно вписать своё имя. */
     val suggestedEncodings: List<String> = listOf(
         "windows-1251", "UTF-8", "IBM866", "KOI8-R", "windows-1252", "ISO-8859-1"
     )
 
-    /** ANSI-кодировка ОС (на русской Windows — windows-1251), а не кодировка файлов JVM. */
     val systemDefault: String
         get() = System.getProperty("sun.jnu.encoding")
-            ?.takeIf { runCatching { Charset.isSupported(it) }.getOrDefault(false) }
+            ?.takeIf { isKnownCharset(it) }
             ?: Charset.defaultCharset().name()
 
     var fallbackEncoding: String
-        // runCatching — не для порчи настроек, а для запуска вне IDE: в юнит-тестах
-        // разбора вывода hg приложения нет и PropertiesComponent.getInstance() падает.
-        get() = runCatching { PropertiesComponent.getInstance().getValue(ENCODING_KEY, systemDefault) }
-            .getOrNull() ?: systemDefault
+        get() = properties()?.getValue(ENCODING_KEY, systemDefault) ?: systemDefault
         set(value) = PropertiesComponent.getInstance().setValue(ENCODING_KEY, value, systemDefault)
 
-    /**
-     * Одна дифф-вкладка на весь плагин: иначе Hg Changes и Hg File History держат
-     * каждая свою, и на экране оказывается два диффа одновременно.
-     */
-    var shareDiffTab: Boolean
-        get() = PropertiesComponent.getInstance().getBoolean(SHARED_DIFF_TAB_KEY, true)
-        set(value) = PropertiesComponent.getInstance().setValue(SHARED_DIFF_TAB_KEY, value, true)
+    var widenToFragments: Boolean
+        get() = properties()?.getBoolean(WIDEN_KEY, true) ?: true
+        set(value) = PropertiesComponent.getInstance().setValue(WIDEN_KEY, value, true)
 
-    fun fallbackCharset(): Charset = runCatching { Charset.forName(fallbackEncoding) }
-        .getOrElse { Charset.defaultCharset() }
+    var changesetsFragments: ChangesetsFragments
+        get() {
+            val name = properties()?.getValue(FRAGMENTS_KEY)
+            return ChangesetsFragments.entries.firstOrNull { it.name == name }
+                ?: ChangesetsFragments.PLATFORM_TRIMMED
+        }
+        set(value) = PropertiesComponent.getInstance()
+            .setValue(FRAGMENTS_KEY, value.name, ChangesetsFragments.PLATFORM_TRIMMED.name)
+
+    var ignoreEolChanges: Boolean
+        get() = properties()?.getBoolean(IGNORE_EOL_KEY, true) ?: true
+        set(value) = PropertiesComponent.getInstance().setValue(IGNORE_EOL_KEY, value, true)
+
+    var statusInTabs: Boolean
+        get() = properties()?.getBoolean(STATUS_IN_TABS_KEY, true) ?: true
+        set(value) = PropertiesComponent.getInstance().setValue(STATUS_IN_TABS_KEY, value, true)
+
+    var useCommandServer: Boolean
+        get() = properties()?.getBoolean(COMMAND_SERVER_KEY, true) ?: true
+        set(value) = PropertiesComponent.getInstance().setValue(COMMAND_SERVER_KEY, value, true)
+
+    var commandServerCount: Int
+        get() = boundCount(
+            properties()?.getInt(COMMAND_SERVER_COUNT_KEY, HgServerPool.DEFAULT_SERVERS)
+                ?: HgServerPool.DEFAULT_SERVERS
+        )
+        set(value) = PropertiesComponent.getInstance()
+            .setValue(COMMAND_SERVER_COUNT_KEY, boundCount(value), HgServerPool.DEFAULT_SERVERS)
+
+    fun boundCount(value: Int): Int =
+        value.coerceIn(HgServerPool.MIN_SERVERS, HgServerPool.MAX_SERVERS)
+
+    fun nativeCharset(): Charset = Charset.forName(systemDefault)
+
+    fun fallbackCharset(): Charset {
+        val name = fallbackEncoding
+        return if (isKnownCharset(name)) Charset.forName(name) else Charset.defaultCharset()
+    }
+
+    private fun properties(): PropertiesComponent? =
+        if (ApplicationManager.getApplication() == null) null else PropertiesComponent.getInstance()
+
+    private fun isKnownCharset(name: String): Boolean = try {
+        Charset.isSupported(name)
+    } catch (_: IllegalArgumentException) {
+        false
+    }
 }

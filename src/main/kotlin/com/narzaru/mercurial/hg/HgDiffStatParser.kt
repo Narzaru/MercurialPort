@@ -2,14 +2,6 @@ package com.narzaru.mercurial.hg
 
 import com.narzaru.mercurial.model.HgDiffStat
 
-/**
- * Считает добавленные/удалённые строки по файлам из вывода `hg diff --git`. Даёт точные
- * числа (в отличие от `--stat`, где гистограмма масштабируется) и заодно показывает,
- * какие файлы изменились на самом деле.
- *
- * Разбор идёт прямо по байтам: дифф целой ветки — это мегабайты, и декодирование его
- * в строку со `split` подвешивало IDE. Декодируются только сами пути.
- */
 object HgDiffStatParser {
 
     fun parse(bytes: ByteArray): Map<String, HgDiffStat> {
@@ -17,6 +9,8 @@ object HgDiffStatParser {
         var path: String? = null
         var added = 0
         var removed = 0
+        var inHeader = false
+        var inBinaryPatch = false
 
         fun flush() {
             path?.let { result[it] = HgDiffStat(added, removed) }
@@ -36,11 +30,23 @@ object HgDiffStatParser {
                     startsWith(bytes, lineStart, DIFF_GIT_PREFIX) -> {
                         flush()
                         path = extractGitPath(bytes, lineStart, contentEnd)
+                        inHeader = true
+                        inBinaryPatch = false
                     }
-                    // Заголовки ---/+++ не считаем, они есть у каждого файла.
-                    startsWith(bytes, lineStart, PLUS_HEADER) || startsWith(bytes, lineStart, MINUS_HEADER) -> Unit
-                    bytes[lineStart] == PLUS -> added++
-                    bytes[lineStart] == MINUS -> removed++
+                    inBinaryPatch -> Unit
+                    startsWith(bytes, lineStart, BINARY_PATCH) -> inBinaryPatch = true
+                    startsWith(bytes, lineStart, RENAME_TO) ->
+                        path = decode(bytes, lineStart + RENAME_TO.size, contentEnd) ?: path
+                    startsWith(bytes, lineStart, COPY_TO) ->
+                        path = decode(bytes, lineStart + COPY_TO.size, contentEnd) ?: path
+                    inHeader && isHeaderLine(bytes, lineStart) -> Unit
+                    else -> {
+                        inHeader = false
+                        when (bytes[lineStart]) {
+                            PLUS -> added++
+                            MINUS -> removed++
+                        }
+                    }
                 }
             }
             lineStart = lineEnd + 1
@@ -57,18 +63,21 @@ object HgDiffStatParser {
         return true
     }
 
-    /** Из строки `diff --git a/path b/path` берёт путь после ` b/`. */
+    private fun isHeaderLine(bytes: ByteArray, offset: Int): Boolean =
+        HEADER_PREFIXES.any { startsWith(bytes, offset, it) }
+
     private fun extractGitPath(bytes: ByteArray, start: Int, end: Int): String? {
         var i = start
         while (i + B_SLASH.size <= end) {
-            if (startsWith(bytes, i, B_SLASH)) {
-                val from = i + B_SLASH.size
-                if (from >= end) return null
-                return HgOutputDecoder.decode(bytes.copyOfRange(from, end)).trim().ifEmpty { null }
-            }
+            if (startsWith(bytes, i, B_SLASH)) return decode(bytes, i + B_SLASH.size, end)
             i++
         }
         return null
+    }
+
+    private fun decode(bytes: ByteArray, from: Int, end: Int): String? {
+        if (from >= end) return null
+        return HgOutputDecoder.decode(bytes.copyOfRange(from, end)).trim().ifEmpty { null }
     }
 
     private const val NEW_LINE = '\n'.code.toByte()
@@ -76,7 +85,22 @@ object HgDiffStatParser {
     private const val PLUS = '+'.code.toByte()
     private const val MINUS = '-'.code.toByte()
     private val DIFF_GIT_PREFIX = "diff --git ".toByteArray(Charsets.US_ASCII)
-    private val PLUS_HEADER = "+++ ".toByteArray(Charsets.US_ASCII)
-    private val MINUS_HEADER = "--- ".toByteArray(Charsets.US_ASCII)
     private val B_SLASH = " b/".toByteArray(Charsets.US_ASCII)
+    private val RENAME_TO = "rename to ".toByteArray(Charsets.US_ASCII)
+    private val COPY_TO = "copy to ".toByteArray(Charsets.US_ASCII)
+    private val BINARY_PATCH = "GIT binary patch".toByteArray(Charsets.US_ASCII)
+    private val HEADER_PREFIXES = listOf(
+        "--- ",
+        "+++ ",
+        "index ",
+        "old mode ",
+        "new mode ",
+        "new file mode ",
+        "deleted file mode ",
+        "similarity index ",
+        "dissimilarity index ",
+        "rename from ",
+        "copy from ",
+        "Binary file"
+    ).map { it.toByteArray(Charsets.US_ASCII) }
 }

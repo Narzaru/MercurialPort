@@ -3,11 +3,6 @@ package com.narzaru.mercurial.changes
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.project.Project
 
-/**
- * Настройки окна Hg Changes, живущие в проекте: фильтры, видимость элементов и
- * отметки «просмотрено». Собраны в одном месте, чтобы ключи не были размазаны
- * строковыми литералами по панели.
- */
 class ChangesSettings(project: Project) : ReviewedPathsStore {
 
     private val props = PropertiesComponent.getInstance(project)
@@ -28,49 +23,39 @@ class ChangesSettings(project: Project) : ReviewedPathsStore {
         get() = props.getBoolean(key("filtersVisible"), false)
         set(value) = props.setValue(key("filtersVisible"), value, false)
 
+    var showUntracked: Boolean
+        get() = props.getBoolean(key("showUntracked"), false)
+        set(value) = props.setValue(key("showUntracked"), value, false)
+
     var showUnchanged: Boolean
         get() = props.getBoolean(key("showUnchanged"), false)
         set(value) = props.setValue(key("showUnchanged"), value, false)
 
-    /**
-     * `Base` mode: keep only the files the branch really left content of its own in, dropping
-     * the ones a merge took whole from the parent branch. Off by default — the unfiltered list
-     * is the one Upsource shows, and this is a deliberate narrowing of it. See [BranchScope].
-     */
-    var ownChangesOnly: Boolean
-        get() = props.getBoolean(key("ownChangesOnly"), false)
-        set(value) = props.setValue(key("ownChangesOnly"), value, false)
+    var revisionsVisible: Boolean
+        get() = props.getBoolean(key("revisionsVisible"), true)
+        set(value) = props.setValue(key("revisionsVisible"), value, true)
+
+    fun revisionOverrides(branch: String): List<String> =
+        props.getList(key("revisions.$branch")).orEmpty()
+
+    fun setRevisionOverrides(branch: String, values: List<String>) =
+        props.setList(key("revisions.$branch"), values)
 
     var statsColumnVisible: Boolean
         get() = props.getBoolean(key("statsColumn"), true)
         set(value) = props.setValue(key("statsColumn"), value, true)
 
-    /**
-     * Отмечать файл просмотренным, как только он открыт (двойной клик или переход на его
-     * вкладку в редакторе). Ревью идёт файл за файлом, и ставить отметку вручную после
-     * каждого — лишний шаг; кому мешает, выключает пунктом в меню ⋮.
-     */
     var markReviewedOnOpen: Boolean
         get() = props.getBoolean(key("markReviewedOnOpen"), true)
         set(value) = props.setValue(key("markReviewedOnOpen"), value, true)
 
-    /**
-     * Highlight the file opened in the editor by selecting its row in the tree — the way
-     * `Always Select Opened File` works for the project view. Selection only: no diff and no
-     * review mark, so jumping around the code during a review does not mark files as seen.
-     */
+    var openDiffInsteadOfFile: Boolean
+        get() = props.getBoolean(key("openDiffInsteadOfFile"), false)
+        set(value) = props.setValue(key("openDiffInsteadOfFile"), value, false)
+
     var selectOpenedFile: Boolean
         get() = props.getBoolean(key("selectOpenedFile"), false)
         set(value) = props.setValue(key("selectOpenedFile"), value, false)
-
-    /**
-     * Append the file's status letter to its editor tab title (`Foo.cs [M]`). Which files the
-     * letters come from follows the panel's comparison mode, so the tabs say the same thing the
-     * change list does.
-     */
-    var statusInTabs: Boolean
-        get() = props.getBoolean(key("statusInTabs"), true)
-        set(value) = props.setValue(key("statusInTabs"), value, true)
 
     override fun load(): List<String> = props.getList(key("reviewed")).orEmpty()
 

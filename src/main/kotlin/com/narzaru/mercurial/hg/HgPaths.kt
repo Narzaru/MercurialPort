@@ -2,35 +2,25 @@ package com.narzaru.mercurial.hg
 
 import java.io.File
 
-/**
- * Работа с путями репозитория. Mercurial везде отдаёт и принимает пути через `/`,
- * а на Windows файловая система — через `\`, поэтому сравнивать и класть в ключи
- * можно только нормализованную форму.
- */
 object HgPaths {
 
-    /** Путь в форме Mercurial: разделители `/`. */
     fun normalize(path: String): String = path.replace('\\', '/')
 
-    /** Нормализованный путь в нижнем регистре — ключ для сравнения путей без учёта регистра. */
     fun key(path: String): String = normalize(path).lowercase()
 
-    /**
-     * Путь [file] относительно [root]. Если файл лежит вне корня, вернём одно имя:
-     * относительный путь для него всё равно не построить, а звать `hg` с абсолютным
-     * путём чужого дерева бессмысленно.
-     */
+    fun keyRelativeTo(path: String, repoRoot: File): String? =
+        relativize(normalize(path), normalize(repoRoot.absolutePath))?.let { key(it) }
+
     fun relativize(file: File, root: File): String = relativize(file.absolutePath, root.absolutePath)
         ?: file.name
 
-    /**
-     * То же для строк. `null`, если [path] не лежит внутри [root] — в отличие от
-     * [relativize] с [File] здесь вызывающая сторона сама решает, чем это заменить.
-     */
     fun relativize(path: String, root: String): String? {
-        // Регистр не учитываем: на Windows один и тот же каталог приходит и как
-        // `D:\repo`, и как `d:\repo` — от диалогов платформы и от самого hg.
-        if (!path.startsWith(root, ignoreCase = true)) return null
-        return path.substring(root.length).trimStart('\\', '/')
+        val rootWithoutTrailingSeparator = root.trimEnd('\\', '/')
+        if (!path.startsWith(rootWithoutTrailingSeparator, ignoreCase = true)) return null
+        val rest = path.substring(rootWithoutTrailingSeparator.length)
+        if (rest.isNotEmpty() && !isSeparator(rest[0])) return null
+        return rest.trimStart('\\', '/')
     }
+
+    private fun isSeparator(char: Char): Boolean = char == '/' || char == '\\'
 }

@@ -11,27 +11,15 @@ import java.awt.Graphics2D
 import java.awt.RenderingHints
 import javax.swing.Icon
 
-/**
- * Иконки, которых в платформе нет: перечёркнутый глаз и точка отметки. Рисуются сами —
- * подходящей пары «пустая/залитая точка» в `AllIcons` нет, а перечёркнутого глаза нет вовсе
- * (`Actions.ToggleVisibility` — глаз с пунктиром, а не со штрихом).
- */
 object HgIcons {
 
-    /** «Показывать то, что обычно скрыто» — неотслеживаемые файлы. */
     val EYE_CROSSED: Icon = SlashedIcon(AllIcons.General.Show)
 
-    /** «Не считать влитое из родительской ветки» — тот же merge, только вычеркнутый. */
-    val MERGE_CROSSED: Icon = SlashedIcon(AllIcons.Vcs.Merge)
-
-    /** Файл просмотрен. */
     val DOT_FILLED: Icon = DotIcon(filled = true)
 
-    /** Файл ещё не просмотрен. */
     val DOT_EMPTY: Icon = DotIcon(filled = false)
 }
 
-/** Иконка с диагональным штрихом поверх. Штрих обводится фоном, иначе он теряется в рисунке. */
 private class SlashedIcon(private val base: Icon) : Icon {
 
     override fun getIconWidth() = base.iconWidth
@@ -65,7 +53,6 @@ private class SlashedIcon(private val base: Icon) : Icon {
     }
 }
 
-/** Точка отметки: залитая — просмотрено, пустая — нет. */
 private class DotIcon(private val filled: Boolean) : Icon {
 
     override fun getIconWidth() = JBUI.scale(SIZE)
@@ -84,7 +71,6 @@ private class DotIcon(private val filled: Boolean) : Icon {
             } else {
                 g2.color = EMPTY_COLOR
                 g2.stroke = BasicStroke(JBUI.scale(1).toFloat())
-                // Диаметр на пиксель меньше: обводка рисуется по контуру и иначе вылезает за него.
                 g2.drawOval(dx, dy, d - 1, d - 1)
             }
         } finally {

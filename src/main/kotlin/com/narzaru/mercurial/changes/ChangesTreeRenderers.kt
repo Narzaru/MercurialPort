@@ -11,34 +11,28 @@ import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBLabel
 import java.awt.BorderLayout
 import java.awt.Color
+import java.awt.Component
 import javax.swing.BorderFactory
 import javax.swing.JPanel
+import javax.swing.JTable
 import javax.swing.JTree
 import javax.swing.SwingConstants
 import javax.swing.table.TableCellRenderer
 import javax.swing.tree.DefaultMutableTreeNode
 
-/**
- * Рендереры дерева изменений. Каждый переиспользует один компонент: на дереве в тысячи
- * строк создание нового Swing-компонента на каждую ячейку заметно тормозит отрисовку —
- * поэтому и тултипы выставляются не здесь, а в `getToolTipText` самой таблицы.
- */
-
-/** Колонка `+N −M`, выровненная по правому краю. */
 class StatsCellRenderer(private val nodeAt: (Int) -> DefaultMutableTreeNode?) : TableCellRenderer {
 
     private val label = SimpleColoredComponent().apply { isOpaque = true }
 
-    /** Прижимает счётчик к правому краю колонки. */
     private val holder = JPanel(BorderLayout()).apply {
         isOpaque = true
         add(label, BorderLayout.EAST)
     }
 
     override fun getTableCellRendererComponent(
-        table: javax.swing.JTable, value: Any?, isSelected: Boolean,
+        table: JTable, value: Any?, isSelected: Boolean,
         hasFocus: Boolean, row: Int, column: Int
-    ): java.awt.Component {
+    ): Component {
         label.clear()
         val background = if (isSelected) table.selectionBackground else table.background
         label.background = background
@@ -63,7 +57,6 @@ class StatsCellRenderer(private val nodeAt: (Int) -> DefaultMutableTreeNode?) : 
     }
 }
 
-/** Колонка отметки просмотра: у каталога точка залита, только когда просмотрено всё внутри. */
 class ReviewCellRenderer(
     private val nodeAt: (Int) -> DefaultMutableTreeNode?,
     private val allReviewed: (DefaultMutableTreeNode) -> Boolean
@@ -77,9 +70,9 @@ class ReviewCellRenderer(
     }
 
     override fun getTableCellRendererComponent(
-        table: javax.swing.JTable, value: Any?, isSelected: Boolean,
+        table: JTable, value: Any?, isSelected: Boolean,
         hasFocus: Boolean, row: Int, column: Int
-    ): java.awt.Component {
+    ): Component {
         label.background = if (isSelected) table.selectionBackground else table.background
         val node = nodeAt(row)
         label.icon = when {
@@ -95,13 +88,6 @@ class ReviewCellRenderer(
     }
 }
 
-/**
- * Дерево: каталог со счётчиком просмотренных, файл со статусом. Непросмотренные файлы
- * жирные, просмотренные и не имеющие реальных изменений — серые и обычным начертанием.
- *
- * [markTruncated] сообщает панели, у каких узлов текст не поместился: тултип показываем
- * только для них, дубликат полного текста на каждой строке только мешает.
- */
 class ChangesNodeRenderer(
     private val isReviewed: (HgFileItem) -> Boolean,
     private val markTruncated: (DefaultMutableTreeNode, Boolean) -> Unit
@@ -132,14 +118,10 @@ class ChangesNodeRenderer(
                 append(
                     fit(text, tree, node, status),
                     when {
-                        // Просмотренные и «без изменений» гасим одинаково: и то, и другое —
-                        // строки, до которых больше нет дела.
                         item.isUnchanged || isReviewed(item) -> SimpleTextAttributes.GRAYED_ATTRIBUTES
                         else -> SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES
                     }
                 )
-                // Откуда переименовали, видно прямо в строке: имя файла само по себе
-                // ничего об этом не говорит, а полный старый путь есть в тултипе.
                 if (item.copiedFrom.isNotEmpty() && !item.isTodoItem) {
                     val from = item.copiedFrom.substringAfterLast('/')
                     append("  ← $from", SimpleTextAttributes.GRAYED_ATTRIBUTES)
@@ -149,13 +131,8 @@ class ChangesNodeRenderer(
         }
     }
 
-    /**
-     * Отступ считаем по уровню узла: `tree.getRowBounds()` здесь звать нельзя —
-     * TreeUI для вычисления границ строки снова вызывает этот же рендерер, получается
-     * бесконечная рекурсия и StackOverflowError прямо в EDT.
-     */
     private fun fit(text: String, tree: JTree, node: DefaultMutableTreeNode, companionText: String): String {
-        val depth = (node.level - 1).coerceAtLeast(0) // корень скрыт
+        val depth = (node.level - 1).coerceAtLeast(0)
         val available = tree.width - depth * LEVEL_INDENT - ICON_AND_PADDING
         if (available <= 0) {
             markTruncated(node, false)
@@ -164,28 +141,24 @@ class ChangesNodeRenderer(
         val metrics = getFontMetrics(font)
         val budget = available - metrics.stringWidth(companionText)
         val fitted = TextFitter.fit(text, budget) { metrics.stringWidth(it) }
-        // Снимаем пометку и когда текст поместился, иначе тултип останется от прошлой ширины.
         markTruncated(node, fitted.truncated)
         return fitted.text
     }
 
     private companion object {
-        /** Иконка узла плюс отступы, которые рендерер занимает помимо текста. */
+
         const val ICON_AND_PADDING = 26
 
-        /** Отступ одного уровня вложенности в дереве. */
         const val LEVEL_INDENT = 20
     }
 }
 
-/** Цвет буквы статуса `hg status`. */
-fun statusColor(status: String?): Color = when (status) {
-    "A" -> JBColor(Color(60, 140, 80), Color(98, 181, 118))
-    "M" -> JBColor(Color(60, 100, 190), Color(110, 160, 240))
-    // `!` — то же удаление, что и `R`, только сделанное мимо hg: цвет общий.
-    "R", "!" -> JBColor(Color(180, 70, 70), Color(220, 110, 110))
-    "?" -> JBColor(Color(150, 70, 190), Color(190, 130, 220))
-    // Переименование — не добавление и не удаление, поэтому и цвет свой.
+private fun statusColor(status: String?): Color = when (status) {
+    HgStatusParser.ADDED_STATUS -> JBColor(Color(60, 140, 80), Color(98, 181, 118))
+    HgStatusParser.MODIFIED_STATUS -> JBColor(Color(60, 100, 190), Color(110, 160, 240))
+    HgStatusParser.REMOVED_STATUS, HgStatusParser.MISSING_STATUS ->
+        JBColor(Color(180, 70, 70), Color(220, 110, 110))
+    HgStatusParser.UNTRACKED_STATUS -> JBColor(Color(150, 70, 190), Color(190, 130, 220))
     HgStatusParser.RENAMED_STATUS -> JBColor(Color(160, 110, 30), Color(210, 165, 80))
     else -> JBColor.GRAY
 }

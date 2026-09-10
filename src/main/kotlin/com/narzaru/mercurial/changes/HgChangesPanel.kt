@@ -1,20 +1,29 @@
 package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.diff.HgDiffTabManager
+import com.narzaru.mercurial.diff.NavigationHistory
 import com.narzaru.mercurial.hg.HgCommandRunner
 import com.narzaru.mercurial.hg.HgContentCache
 import com.narzaru.mercurial.hg.HgDiffStatParser
-import com.narzaru.mercurial.hg.HgOutputDecoder
+import com.narzaru.mercurial.hg.HgFailure
+import com.narzaru.mercurial.model.ChangesetsFragments
 import com.narzaru.mercurial.hg.HgPaths
+import com.narzaru.mercurial.hg.HgSettings
 import com.narzaru.mercurial.hg.HgSettingsConfigurable
-import com.narzaru.mercurial.hg.HgStatusParser
 import com.narzaru.mercurial.history.HgFileHistoryService
+import com.narzaru.mercurial.model.HgDiffStat
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
 import com.narzaru.mercurial.model.HgListMode
 import com.narzaru.mercurial.status.HgFileStatusService
 import com.intellij.diff.DiffContentFactory
+import com.intellij.diff.comparison.ComparisonManager
+import com.intellij.diff.comparison.ComparisonPolicy
 import com.intellij.diff.requests.SimpleDiffRequest
+import com.intellij.diff.tools.util.base.TextDiffSettingsHolder
+import com.intellij.diff.util.DiffUserDataKeys
+import com.intellij.diff.util.Side
+import com.intellij.openapi.progress.DumbProgressIndicator
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
@@ -29,19 +38,37 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.editor.Document
+import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.editor.event.DocumentListener
+import com.intellij.openapi.editor.event.DocumentEvent as EditorDocumentEvent
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.fileTypes.FileType
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.guessProjectDir
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.util.Pair
+import com.intellij.ui.JBSplitter
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.vfs.newvfs.BulkFileListener
+import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent
+import com.intellij.openapi.vfs.newvfs.events.VFileCopyEvent
+import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent
+import com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent
+import com.intellij.openapi.vfs.newvfs.events.VFileEvent
+import com.intellij.openapi.vfs.newvfs.events.VFileMoveEvent
+import com.intellij.openapi.vfs.newvfs.events.VFilePropertyChangeEvent
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ex.ToolWindowEx
+import com.intellij.ui.ClickListener
 import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.components.JBLabel
@@ -57,9 +84,17 @@ import com.intellij.util.ui.UIUtil
 import com.intellij.util.ui.tree.TreeUtil
 import java.awt.BorderLayout
 import java.awt.FlowLayout
-import java.awt.event.MouseAdapter
+import java.awt.GridLayout
+import java.awt.event.ActionEvent
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
 import java.awt.event.MouseEvent
 import java.io.File
+import java.util.Collections
+import java.util.WeakHashMap
+import java.util.concurrent.ConcurrentHashMap
+import javax.swing.AbstractAction
+import javax.swing.BoxLayout
 import javax.swing.Icon
 import javax.swing.JComboBox
 import javax.swing.JComponent
@@ -67,64 +102,80 @@ import javax.swing.JList
 import javax.swing.JPanel
 import javax.swing.JTable
 import javax.swing.KeyStroke
+import javax.swing.ListSelectionModel
 import javax.swing.SwingConstants
+import javax.swing.ToolTipManager
 import javax.swing.event.DocumentEvent
 import javax.swing.table.TableCellRenderer
+import javax.swing.table.TableColumn
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.TreePath
 
-/**
- * Главное окно плагина: дерево изменённых файлов Mercurial в стиле Upsource —
- * с отметками «просмотрено», статистикой +/- по файлам, режимами сравнения,
- * фильтрами, открытием/диффом/откатом и режимом TODO.
- *
- * Разбор вывода `hg` живёт в пакете `hg`, отметки — в [ReviewState], отрисовка строк —
- * в [ChangesTreeRenderers]; здесь остаётся сборка UI и оркестровка.
- */
 class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
 
     private val settings = ChangesSettings(project)
     private val review = ReviewState(settings)
 
-    // Состояние
     private var displayMode = HgDisplayMode.UNCOMMITTED
     private var listMode = HgListMode.FILES
     private var showUntracked = false
     private var showUnchanged = false
 
-    /** `Base` mode only: drop files a merge took whole from the parent branch. */
-    private var ownChangesOnly = false
+    private var lastActivatedPath = ""
+
+    @Volatile
+    private var comparison = ComparisonState()
+
+    private val partialDiff = ConcurrentHashMap<String, Int>()
+
+    private var branchRevisions: List<HgRevision> = emptyList()
+    private var revisionSelection = RevisionSelection.DEFAULT
+    private var currentBranchName = ""
+    private var revisionsVisible = true
+
     private var filtersVisible = false
     private var statsVisible = true
-    private var currentRepoRoot: File? = null
-    private var currentBaseRev: String = "."
-    private var busy = false
+
+    private var lastComparison = ""
+    private var activeTasks = 0
+    private val busy: Boolean get() = activeTasks > 0
+    private var toolbar: ActionToolbar? = null
     private val sourceFiles = ArrayList<HgFileItem>()
+
     private var currentTodoItems: List<HgFileItem> = emptyList()
 
     private val debounceAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, project)
-    private val todoAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, project)
+    private val fileChangeAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, project)
 
-    /** Откладывает дифф и отметку при переходе стрелками, пока список листают насквозь. */
+    private val pendingChangedPaths: MutableSet<String> =
+        Collections.synchronizedSet(LinkedHashSet<String>())
+
+    @Volatile
+    private var todoRescanPending = false
+
+    private val revisionsAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, project)
+
     private val selectionAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, project)
 
-    /** Счётчик запросов диффа: результат устаревшего клика игнорируется. */
-    private var diffRequestId = 0
-
-    /** То же для упреждающего чтения соседей: пачка от прошлой строки бросается на полпути. */
     private var prefetchId = 0
 
-    /**
-     * Содержимое файлов на базовой ревизии. Оно неизменно, а каждый `hg cat` стоит
-     * запуска Mercurial целиком — четверть секунды до начала полезной работы.
-     */
     private val baseContentCache = HgContentCache()
 
-    /** То же для фонового подсчёта +/-, плюс флаг «считается прямо сейчас». */
+    private val lineComparator = object : LineComparator {
+        override fun changedLines(left: String, right: String): List<DiffFragment> =
+            compareLines(left, right, ComparisonPolicy.DEFAULT)
+
+        override fun fragmentLines(left: String, right: String): List<DiffFragment> =
+            compareLines(left, right, fragmentPolicy())
+    }
+
+    private var refreshId = 0
+
+    private var todoScanId = 0
+
     private var statsRequestId = 0
     private var statsPending = false
 
-    // UI
     private val filterField = JBTextField()
     private val excludeField = JBTextField()
     private val branchField = JBTextField(10)
@@ -133,48 +184,32 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private val summaryLabel = JBLabel(" ")
     private val filtersRow = JPanel(BorderLayout(4, 0))
     private val modeRow = JPanel(BorderLayout(4, 0))
+    private val revisionsBar = RevisionsBar(::toggleRevision, ::resetRevisions)
 
-    /**
-     * Holder of [branchField]. Hidden as a whole outside `VS branch`: hiding just the field leaves
-     * the holder's own padding on the right, and the mode combo ends short of the fields below it.
-     */
+    private val revisionsSplitter = JBSplitter(true, REVISIONS_PROPORTION_KEY, DEFAULT_TREE_PROPORTION)
+
     private val branchHolder = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
 
-    /**
-     * Узлы, текст которых рендерер обрезал многоточием, — только для них показываем тултип.
-     * Ключи слабые: дерево пересобирается целиком на каждый renderFiltered().
-     */
     private val truncatedNodes: MutableSet<DefaultMutableTreeNode> =
-        java.util.Collections.newSetFromMap(java.util.WeakHashMap())
+        Collections.newSetFromMap(WeakHashMap())
 
-    // Рендереры объявлены до дерева: свойство, объявленное ниже места использования,
-    // к моменту настройки колонок ещё не проинициализировано (`by lazy` не спасает —
-    // делегат тоже поле и инициализируется по порядку объявления).
     private val statsRenderer: TableCellRenderer = StatsCellRenderer { nodeAt(it) }
     private val eyeRenderer: TableCellRenderer = ReviewCellRenderer({ nodeAt(it) }, ::allReviewed)
 
-    /**
-     * Снимает блокировку активации строк. Объявлено до дерева: TreeTable трогает выделение
-     * уже из своего конструктора, а свойство, объявленное ниже места использования, к тому
-     * моменту ещё не проинициализировано.
-     */
     private var uiReady = false
 
     private val treeRoot = DefaultMutableTreeNode(DirNode(""))
     private val treeModel = ListTreeTableModelOnColumns(treeRoot, buildColumns())
 
-    // Подсказку считаем сами по строке под курсором: рендереры переиспользуют один
-    // компонент, и выставленный в них toolTipText JTable отдаёт от «чужой» строки
-    // (либо не отдаёт вовсе). Здесь, вне рендерера, звать API дерева уже безопасно.
+    private var renderedRoot = treeRoot
+    private var renderedFiles: List<HgFileItem> = emptyList()
+
     private val tree = object : TreeTable(treeModel) {
         override fun getToolTipText(event: MouseEvent): String? = tooltipAt(event)
 
-        /** true, пока строку выбирает мышь: клики обрабатываются отдельно и без задержки. */
         private var mouseDriven = false
 
         override fun processMouseEvent(e: MouseEvent) {
-            // UI меняет выделение внутри этого вызова, поэтому происхождение смены
-            // видно только отсюда — в самом changeSelection мыши от клавиатуры не отличить.
             mouseDriven = true
             try {
                 super.processMouseEvent(e)
@@ -185,7 +220,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
         override fun changeSelection(row: Int, column: Int, toggle: Boolean, extend: Boolean) {
             super.changeSelection(row, column, toggle, extend)
-            if (!mouseDriven) onKeyboardSelection(row)
+            if (!mouseDriven && !toggle && !extend) onKeyboardSelection(row)
         }
     }
 
@@ -194,86 +229,77 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         loadSettings()
         uiReady = true
         followActiveEditor()
+        watchDocumentsForTodos()
+        watchFilesForChanges()
+        project.service<HgChangesService>().panel = this
         refresh()
     }
 
-    override fun dispose() = Unit
+    override fun dispose() {
+        val service = project.service<HgChangesService>()
+        if (service.panel === this) service.panel = null
+    }
 
-    // region Выбор строки -----------------------------------------------------
-
-    /**
-     * Выбор файла — и есть его просмотр: показываем дифф и ставим отметку. Единая точка
-     * для клика мышью и для перехода стрелками.
-     */
     private fun activateRow(row: Int) {
-        val item = (nodeAt(row)?.userObject as? FileNode)?.item ?: return
+        activateItem((nodeAt(row)?.userObject as? FileNode)?.item ?: return)
+    }
+
+    private fun activateKey(key: String) {
+        if (tree.selectedRowCount > 1) return
+        val row = (0 until tree.rowCount).firstOrNull { keyAtRow(it) == key } ?: return
+        if (!tree.selectionModel.isSelectedIndex(row)) return
+        activateRow(row)
+    }
+
+    private fun keyAtRow(row: Int): String? =
+        (nodeAt(row)?.userObject as? FileNode)?.item?.let { FileKeys.of(it) }
+
+    private fun activateItem(item: HgFileItem) {
+        lastActivatedPath = HgPaths.key(item.path)
         syncFileHistory(item)
         if (item.isTodoItem) return
         diffFile(item)
-        if (settings.markReviewedOnOpen && review.set(listOf(item), true)) renderFiltered()
-        prefetchAround(row)
+        if (settings.markReviewedOnOpen && review.set(listOf(item), true)) renderReviewMarks()
+        prefetchAround(item)
     }
 
-    /**
-     * Стрелками список пролистывают насквозь, поэтому дифф и отметка ждут остановки:
-     * иначе проход по ветке в полсотни файлов пометил бы их все и породил столько же
-     * процессов `hg cat`, из которых пригодился бы последний.
-     */
+    private fun visibleFiles(): List<HgFileItem> = (0 until tree.rowCount)
+        .mapNotNull { (nodeAt(it)?.userObject as? FileNode)?.item }
+
     private fun onKeyboardSelection(row: Int) {
-        // TreeTable трогает выделение уже в своём конструкторе, когда поля панели
-        // (и сама ссылка на дерево) ещё не проинициализированы.
         if (!uiReady) return
         selectionAlarm.cancelAllRequests()
-        selectionAlarm.addRequest({ activateRow(row) }, SELECTION_DEBOUNCE_MS)
+        val item = (nodeAt(row)?.userObject as? FileNode)?.item ?: return
+        val key = FileKeys.of(item)
+        selectionAlarm.addRequest({ activateKey(key) }, SELECTION_DEBOUNCE_MS)
     }
 
-    /**
-     * Highlights the file opened in the editor, the way `Always Select Opened File` works for
-     * the project view. Selection only — no diff and no review mark: during a review one jumps
-     * to a neighbouring class just to read it, and that must not count as reviewing it.
-     */
     private fun followActiveEditor() {
         project.messageBus.connect(this).subscribe(
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
             object : FileEditorManagerListener {
                 override fun selectionChanged(event: FileEditorManagerEvent) {
                     if (!settings.selectOpenedFile) return
-                    val file = event.newFile ?: return
-                    if (file.isDirectory) return
-                    // A diff tab is not a file on disk — the manager knows which file it shows.
-                    // Without this, coming back to a diff tab left the list pointing elsewhere.
-                    val path = if (file.isInLocalFileSystem) file.path
-                    else project.service<HgDiffTabManager>().sourcePathOf(file) ?: return
-                    selectOpenedFile(path)
+                    selectOpenedFile(sourcePathOf(event.newFile) ?: return)
                 }
             }
         )
     }
 
-    /**
-     * Selects the row of the opened file, and clears the selection when the file is not in the
-     * list: a stale highlight on another row would read as "this file is changed", which is
-     * exactly the question being asked.
-     */
-    /** Подсвечивает файл, открытый в редакторе прямо сейчас, — дифф-вкладку в том числе. */
     private fun selectCurrentEditorFile() {
-        val file = FileEditorManager.getInstance(project).selectedFiles.firstOrNull() ?: return
-        if (file.isDirectory) return
-        val path = if (file.isInLocalFileSystem) file.path
-        else project.service<HgDiffTabManager>().sourcePathOf(file) ?: return
-        selectOpenedFile(path)
+        val opened = FileEditorManager.getInstance(project).selectedFiles.firstOrNull()
+        selectOpenedFile(sourcePathOf(opened) ?: return)
+    }
+
+    private fun sourcePathOf(file: VirtualFile?): String? {
+        if (file == null || file.isDirectory) return null
+        if (file.isInLocalFileSystem) return file.path
+        return project.service<HgDiffTabManager>().sourcePathOf(file)
     }
 
     private fun selectOpenedFile(filePath: String) {
-        val repoRoot = currentRepoRoot ?: return
-        val relative = HgPaths.relativize(
-            HgPaths.normalize(filePath),
-            // VFS reports paths with `/`, File.absolutePath on Windows with `\`.
-            HgPaths.normalize(repoRoot.absolutePath)
-        ) ?: return
-        val key = HgPaths.key(relative)
-        // A pending row activation from arrow-key scrolling is moot once we move elsewhere.
-        selectionAlarm.cancelAllRequests()
+        val repoRoot = comparison.repoRoot ?: return
+        val key = HgPaths.keyRelativeTo(filePath, repoRoot) ?: return
         for (row in 0 until tree.rowCount) {
             val item = (nodeAt(row)?.userObject as? FileNode)?.item ?: continue
             if (HgPaths.key(item.path) != key) continue
@@ -286,13 +312,9 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         tree.selectionModel.clearSelection()
     }
 
-    // endregion
-
-    // region UI ---------------------------------------------------------------
-
     private fun buildUi() {
         val north = JPanel()
-        north.layout = javax.swing.BoxLayout(north, javax.swing.BoxLayout.Y_AXIS)
+        north.layout = BoxLayout(north, BoxLayout.Y_AXIS)
         north.add(buildToolbar())
         north.add(buildModeRow())
         north.add(buildFiltersRow())
@@ -304,14 +326,14 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         add(north, BorderLayout.NORTH)
         configureTree()
         val scroll = JBScrollPane(tree)
-        // Заголовки колонок здесь ничего не поясняют, а строку занимают. Снимаем их
-        // со скроллпейна, а не через tree.tableHeader = null — иначе TreeTable падает
-        // при перестройке колонок и дерево остаётся пустым.
         scroll.setColumnHeaderView(null)
-        add(scroll, BorderLayout.CENTER)
+        revisionsBar.isVisible = false
+        revisionsSplitter.firstComponent = scroll
+        revisionsSplitter.secondComponent = revisionsBar
+        add(revisionsSplitter, BorderLayout.CENTER)
 
-        addComponentListener(object : java.awt.event.ComponentAdapter() {
-            override fun componentResized(e: java.awt.event.ComponentEvent) {
+        addComponentListener(object : ComponentAdapter() {
+            override fun componentResized(e: ComponentEvent) {
                 north.revalidate()
                 north.repaint()
             }
@@ -321,41 +343,47 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun buildToolbar(): JComponent {
         val group = DefaultActionGroup()
         group.add(action("Refresh", "Reload the changes", AllIcons.Actions.Refresh) { refresh() })
-        group.add(action("Undo Changes", "Revert the selected files", AllIcons.Actions.Rollback) { revertSelected() })
+        group.add(action(
+            "Undo Changes", "Revert the selected files", AllIcons.Actions.Rollback,
+            { !displayMode.isChangesets }
+        ) { revertSelected() })
         group.add(Separator.getInstance())
         group.add(toggle("Files", "List of files", AllIcons.Actions.ListFiles,
             { listMode == HgListMode.FILES }) { setListMode(HgListMode.FILES) })
         group.add(toggle("TODO", "TODO comments in the changed files", AllIcons.General.TodoDefault,
             { listMode == HgListMode.TODO }) { setListMode(HgListMode.TODO) })
         group.add(Separator.getInstance())
-        group.add(toggle("Show Untracked", "Show untracked files (?)", HgIcons.EYE_CROSSED,
-            { showUntracked }) { showUntracked = !showUntracked; refresh() })
-        group.add(toggle("Show Unchanged", "Show files with no real changes (♦)", AllIcons.Vcs.Equal,
+        group.add(toggle(
+            "Show Untracked", "Show untracked files (?)", HgIcons.EYE_CROSSED,
+            { showUntracked },
+            { !displayMode.isChangesets }
+        ) { setShowUntracked(!showUntracked) })
+        group.add(toggle(
+            "Show Unchanged",
+            "Show files with no real changes (${DiffStatsPlan.UNCHANGED_STATUS})",
+            AllIcons.Vcs.Equal,
             { showUnchanged }) { setShowUnchanged(!showUnchanged) })
         group.add(toggle("Filter", "Show the Filter/Exclude fields", AllIcons.General.Filter,
             { filtersVisible }) { setFiltersVisible(!filtersVisible) })
-        // Своя категория: остальные тумблеры решают, что показать из уже собранного списка,
-        // а этот меняет сам список — для него нужен новый запрос к hg.
         group.add(Separator.getInstance())
         group.add(toggle(
-            "Own Changes Only",
-            "Hide files whose content matches the parent branch: everything in them came from a " +
-                "merge, not from this branch. Applies to the '${HgDisplayMode.BRANCH.title}' mode.",
-            HgIcons.MERGE_CROSSED,
-            { ownChangesOnly },
-            { displayMode == HgDisplayMode.BRANCH && !busy }
-        ) { setOwnChangesOnly(!ownChangesOnly) })
+            "Revisions",
+            "Show the branch's revisions under the list and pick which of them the review covers. " +
+                "Applies to the '${HgDisplayMode.BRANCH.title}' and 'Changesets' modes.",
+            AllIcons.Vcs.Branch,
+            { revisionsVisible },
+            { displayMode.usesRevisions }
+        ) { setRevisionsVisible(!revisionsVisible) })
 
-        val toolbar = ActionManager.getInstance().createActionToolbar("HgChanges", group, true)
-        toolbar.targetComponent = this
-        toolbar.setLayoutPolicy(ActionToolbar.WRAP_LAYOUT_POLICY)
-        return toolbar.component
+        val created = ActionManager.getInstance().createActionToolbar("HgChanges", group, true)
+        created.targetComponent = this
+        created.setLayoutPolicy(ActionToolbar.WRAP_LAYOUT_POLICY)
+        toolbar = created
+        return created.component
     }
 
     private fun buildModeRow(): JPanel {
         modeRow.border = JBUI.Borders.empty(0, 4, 2, 4)
-        // Пояснение к режиму — тултипом: и у пунктов списка, и у самого поля, иначе разницу
-        // между двумя режимами ветки видно только по цифрам в готовом списке.
         modeCombo.renderer = object : SimpleListCellRenderer<HgDisplayMode>() {
             override fun customize(
                 list: JList<out HgDisplayMode>, value: HgDisplayMode?,
@@ -385,7 +413,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
     private fun buildFiltersRow(): JPanel {
         filtersRow.border = JBUI.Borders.empty(0, 4, 2, 4)
-        val fields = JPanel(java.awt.GridLayout(1, 2, 4, 0))
+        val fields = JPanel(GridLayout(1, 2, 4, 0))
         filterField.emptyText.text = "Filter…"
         excludeField.emptyText.text = "Exclude…"
         fields.add(filterField)
@@ -411,11 +439,17 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         return row
     }
 
-    private fun action(text: String, description: String, icon: Icon?, perform: () -> Unit): AnAction =
+    private fun action(
+        text: String,
+        description: String,
+        icon: Icon?,
+        enabled: () -> Boolean = { true },
+        perform: () -> Unit
+    ): AnAction =
         object : AnAction(text, description, icon) {
             override fun actionPerformed(e: AnActionEvent) = perform()
             override fun update(e: AnActionEvent) {
-                e.presentation.isEnabled = !busy
+                e.presentation.isEnabled = !busy && enabled()
             }
 
             override fun getActionUpdateThread() = ActionUpdateThread.EDT
@@ -440,10 +474,6 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         override fun getActionUpdateThread() = ActionUpdateThread.EDT
     }
 
-    // endregion
-
-    // region Дерево -----------------------------------------------------------
-
     private fun buildColumns(): Array<ColumnInfo<*, *>> = arrayOf(
         object : ColumnInfo<DefaultMutableTreeNode, Any>("Files") {
             override fun valueOf(item: DefaultMutableTreeNode): Any = item
@@ -464,14 +494,16 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         tree.setTreeCellRenderer(ChangesNodeRenderer(review::isReviewed, ::markTruncated))
         tree.tree.isRootVisible = false
         tree.tree.showsRootHandles = true
-        tree.selectionModel.selectionMode = javax.swing.ListSelectionModel.MULTIPLE_INTERVAL_SELECTION
+        tree.selectionModel.selectionMode = ListSelectionModel.MULTIPLE_INTERVAL_SELECTION
         tree.autoResizeMode = JTable.AUTO_RESIZE_ALL_COLUMNS
         applyColumnWidths()
-        // Без явной регистрации ToolTipManager не опрашивает таблицу и getToolTipText не зовётся.
-        javax.swing.ToolTipManager.sharedInstance().registerComponent(tree)
-        tree.addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) = handleClick(e)
-        })
+        ToolTipManager.sharedInstance().registerComponent(tree)
+        object : ClickListener() {
+            override fun onClick(event: MouseEvent, clickCount: Int): Boolean {
+                handleClick(event, clickCount)
+                return false
+            }
+        }.installOn(tree)
         installReviewToggleShortcut()
     }
 
@@ -482,7 +514,6 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun applyColumnWidths() {
         column(COL_STATS)?.apply {
             minWidth = STATS_WIDTH; maxWidth = STATS_WIDTH; preferredWidth = STATS_WIDTH; resizable = false
-            // TreeTable не спрашивает рендерер у ColumnInfo — задаём его на самой колонке.
             cellRenderer = statsRenderer
         }
         column(COL_EYE)?.apply {
@@ -492,8 +523,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         applyStatsColumnVisibility()
     }
 
-    /** Колонка по индексу в модели: при скрытом `±` порядок в columnModel уже другой. */
-    private fun column(modelIndex: Int): javax.swing.table.TableColumn? =
+    private fun column(modelIndex: Int): TableColumn? =
         (0 until tree.columnModel.columnCount)
             .map { tree.columnModel.getColumn(it) }
             .firstOrNull { it.modelIndex == modelIndex }
@@ -502,7 +532,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         val existing = column(COL_STATS)
         when {
             statsVisible && existing == null -> {
-                val restored = javax.swing.table.TableColumn(COL_STATS, STATS_WIDTH, statsRenderer, null).apply {
+                val restored = TableColumn(COL_STATS, STATS_WIDTH, statsRenderer, null).apply {
                     minWidth = STATS_WIDTH; maxWidth = STATS_WIDTH; resizable = false
                 }
                 tree.columnModel.addColumn(restored)
@@ -520,17 +550,22 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         tree.repaint()
     }
 
-    /** Пункты в меню тул-окна (⋮) — редко используемые настройки панели. */
     fun installGearActions(toolWindow: ToolWindow) {
         if (toolWindow !is ToolWindowEx) return
         toolWindow.setAdditionalGearActions(
             DefaultActionGroup(
-                // Сброс отметок — команда, а не переключатель, и делает он много: держим его
-                // отдельной группой сверху, чтобы не нажимался заодно с настройками панели.
                 action("Clear Reviewed", "Drop every review mark", null) { clearReviewed() },
                 Separator.getInstance(),
                 toggle("Show ± Column", "Show the added/removed lines column", null,
                     { statsVisible }) { setStatsVisible(!statsVisible) },
+                toggle(
+                    "Open Diff Instead of File",
+                    "Arriving at a changed file by a navigation shows its diff instead of the file",
+                    null,
+                    { settings.openDiffInsteadOfFile }
+                ) {
+                    settings.openDiffInsteadOfFile = !settings.openDiffInsteadOfFile
+                },
                 toggle("Mark Reviewed on Open", "Mark a file reviewed when it is opened", null,
                     { settings.markReviewedOnOpen }) {
                     settings.markReviewedOnOpen = !settings.markReviewedOnOpen
@@ -544,16 +579,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                     settings.selectOpenedFile = !settings.selectOpenedFile
                     if (settings.selectOpenedFile) selectCurrentEditorFile()
                 },
-                toggle(
-                    "Status Letter in Editor Tabs",
-                    "Append the file status to the editor tab title: Foo.cs [M]",
-                    null,
-                    { settings.statusInTabs }
-                ) {
-                    settings.statusInTabs = !settings.statusInTabs
-                    project.service<HgFileStatusService>().refreshOpenTabs()
-                },
-                action("Encoding Settings…", "Encoding of commit messages and hg output", null) {
+                action("Mercurial Port Settings…", "Diff, encoding and editor tab options", null) {
                     ShowSettingsUtil.getInstance().showSettingsDialog(project, HgSettingsConfigurable::class.java)
                     refresh()
                 }
@@ -566,17 +592,12 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         return tree.tree.getPathForRow(viewRow)?.lastPathComponent as? DefaultMutableTreeNode
     }
 
-    /** Просмотрен ли узел целиком. У каталога берём готовый агрегат, а не обходим поддерево. */
     private fun allReviewed(node: DefaultMutableTreeNode): Boolean = when (val payload = node.userObject) {
         is FileNode -> review.isReviewed(payload.item)
         is DirNode -> payload.fileCount > 0 && payload.reviewedCount == payload.fileCount
         else -> false
     }
 
-    /**
-     * Полный текст строки под курсором — но только там, где рендерер обрезал его многоточием:
-     * тултип-дубликат на каждой строке только мешает.
-     */
     private fun tooltipAt(event: MouseEvent): String? {
         val viewColumn = tree.columnAtPoint(event.point)
         if (viewColumn < 0) return null
@@ -586,11 +607,6 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
         val node = nodeAt(tree.rowAtPoint(event.point)) ?: return null
         val payload = node.userObject
-        // Откуда переименован файл, по строке видно только по имени — полный старый путь
-        // показываем всегда, а не только когда текст не поместился.
-        if (payload is FileNode && payload.item.copiedFrom.isNotEmpty()) {
-            return "${payload.item.copiedFrom} → ${payload.item.path}"
-        }
         if (node !in truncatedNodes) return null
         return when (payload) {
             is DirNode -> payload.name
@@ -602,47 +618,39 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun selectedNodes(): List<DefaultMutableTreeNode> =
         tree.selectedRows.toList().mapNotNull { nodeAt(it) }
 
-    /**
-     * Клик по «глазику» переключает отметку (у каталога — сразу для всех файлов внутри),
-     * одинарный клик по файлу показывает дифф и отмечает просмотренным, двойной —
-     * открывает файл.
-     */
-    private fun handleClick(e: MouseEvent) {
+    private fun handleClick(e: MouseEvent, clickCount: Int) {
         if (e.button != MouseEvent.BUTTON1) return
         val viewRow = tree.rowAtPoint(e.point)
         val node = nodeAt(viewRow) ?: return
 
-        // Сравниваем с индексом в модели: при скрытой колонке ± порядок на экране другой.
         val clickedColumn = tree.columnAtPoint(e.point)
         if (clickedColumn >= 0 && tree.convertColumnIndexToModel(clickedColumn) == COL_EYE) {
-            // Отметку здесь ставят руками, поэтому обычную активацию строки не запускаем:
-            // иначе клик по невыделенному глазику сначала отметил бы файл, а потом снял.
-            if (e.clickCount == 1 && review.toggle(ChangesTreeBuilder.filesOf(node))) renderFiltered()
+            if (clickCount == 1 && review.toggle(ChangesTreeBuilder.filesOf(node))) renderReviewMarks()
             return
         }
 
         val payload = node.userObject
         if (payload is DirNode) {
-            // По колонке дерева двойной клик раскрывает узел сам: TreeTable отдаёт события
-            // этой колонки самому дереву. Свой вызов сворачивал каталог и тут же разворачивал
-            // обратно. В остальных колонках событие до дерева не доходит — там разворачиваем мы.
             val onTreeColumn = clickedColumn >= 0 && tree.convertColumnIndexToModel(clickedColumn) == COL_TREE
-            if (e.clickCount == 2 && !onTreeColumn) toggleExpand(viewRow)
+            if (clickCount == 2 && !onTreeColumn) toggleExpand(viewRow)
             return
         }
         val item = (payload as? FileNode)?.item ?: return
-        // Клик мышью обрабатываем без задержки — в отличие от перехода стрелками,
-        // где активацию строки приходится ждать (см. onKeyboardSelection).
         selectionAlarm.cancelAllRequests()
-        when (e.clickCount) {
-            1 -> activateRow(viewRow)
-            2 -> openFile(item)
+        val activated = HgPaths.key(item.path) == lastActivatedPath
+        when (ClickGesture.onFile(clickCount, e.modifiersEx, activated)) {
+            FileClickAction.IGNORE -> return
+            FileClickAction.ACTIVATE -> activateRow(viewRow)
+            FileClickAction.ACTIVATE_AFTER_GUARD -> {
+                val key = FileKeys.of(item)
+                selectionAlarm.addRequest({ activateKey(key) }, DOUBLE_CLICK_GUARD_MS)
+            }
+            FileClickAction.OPEN_FILE -> openFile(item)
         }
     }
 
-    /** Держит окно Hg File History на том же файле, что выбран здесь. */
     private fun syncFileHistory(item: HgFileItem) {
-        val repoRoot = currentRepoRoot ?: return
+        val repoRoot = comparison.repoRoot ?: return
         project.service<HgFileHistoryService>().syncTo(File(repoRoot, item.path).path)
     }
 
@@ -656,24 +664,20 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         tree.inputMap.put(KeyStroke.getKeyStroke("SPACE"), key)
         tree.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
             .put(KeyStroke.getKeyStroke("SPACE"), key)
-        tree.actionMap.put(key, object : javax.swing.AbstractAction() {
-            override fun actionPerformed(e: java.awt.event.ActionEvent?) = toggleReviewedForSelection()
+        tree.actionMap.put(key, object : AbstractAction() {
+            override fun actionPerformed(e: ActionEvent?) = toggleReviewedForSelection()
         })
     }
-
-    // endregion
-
-    // region Настройки --------------------------------------------------------
 
     private fun loadSettings() {
         filterField.text = settings.filter
         excludeField.text = settings.exclude
         branchField.text = settings.compareBranch
-        // Только сохранённое значение: раньше непустой текст фильтра разворачивал поля
-        // почти всегда, и «скрыть» переживало перезапуск лишь при пустых фильтрах.
-        setFiltersVisible(settings.filtersVisible)
+        filtersVisible = settings.filtersVisible
+        applyFiltersVisibility()
+        showUntracked = settings.showUntracked
         showUnchanged = settings.showUnchanged
-        ownChangesOnly = settings.ownChangesOnly
+        revisionsVisible = settings.revisionsVisible
         statsVisible = settings.statsColumnVisible
         applyStatsColumnVisibility()
         review.reload()
@@ -684,35 +688,66 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         settings.filter = filterField.text ?: ""
         settings.exclude = excludeField.text ?: ""
         settings.compareBranch = branchField.text ?: ""
-        settings.filtersVisible = filtersVisible
     }
 
     private fun setFiltersVisible(visible: Boolean) {
         filtersVisible = visible
-        // Сохраняем сразу: debounce срабатывает только при правке текста фильтра,
-        // так что иначе одно переключение тумблера до перезапуска не доживало.
         settings.filtersVisible = visible
-        filtersRow.isVisible = visible
+        applyFiltersVisibility()
+    }
+
+    private fun applyFiltersVisibility() {
+        filtersRow.isVisible = filtersVisible
         revalidate()
         repaint()
+    }
+
+    private fun setShowUntracked(visible: Boolean) {
+        showUntracked = visible
+        settings.showUntracked = visible
+        refresh()
     }
 
     private fun setShowUnchanged(visible: Boolean) {
         showUnchanged = visible
         settings.showUnchanged = visible
-        // Флаг isUnchanged уже посчитан в loadDiffStats — перечитывать hg незачем.
         renderFiltered()
     }
 
-    private fun setOwnChangesOnly(enabled: Boolean) {
-        ownChangesOnly = enabled
-        settings.ownChangesOnly = enabled
-        // Меняется сам список файлов, а не его показ, — нужен новый запрос к hg.
-        refresh()
+    private fun setRevisionsVisible(visible: Boolean) {
+        revisionsVisible = visible
+        settings.revisionsVisible = visible
+        updateRevisionsBarVisibility()
+    }
+
+    private fun updateRevisionsBarVisibility() {
+        revisionsBar.isVisible =
+            revisionsVisible && displayMode.usesRevisions && branchRevisions.isNotEmpty()
+        revalidate()
+        repaint()
+    }
+
+    private fun toggleRevision(revision: HgRevision, selected: Boolean) {
+        revisionSelection = revisionSelection.with(revision, selected)
+        settings.setRevisionOverrides(currentBranchName, revisionSelection.toStorage())
+        revisionsBar.updateHeader(branchRevisions, revisionSelection)
+        scheduleRevisionsRefresh()
+    }
+
+    private fun resetRevisions() {
+        revisionSelection = RevisionSelection.DEFAULT
+        settings.setRevisionOverrides(currentBranchName, emptyList())
+        revisionsBar.update(branchRevisions, revisionSelection)
+        scheduleRevisionsRefresh()
+    }
+
+    private fun scheduleRevisionsRefresh() {
+        revisionsAlarm.cancelAllRequests()
+        revisionsAlarm.addRequest({ refresh() }, REVISIONS_DEBOUNCE_MS)
     }
 
     private fun updateBranchFieldVisibility() {
-        val custom = displayMode == HgDisplayMode.CUSTOM_BRANCH
+        val custom = displayMode.usesBranchField
         branchField.isVisible = custom
         branchHolder.isVisible = custom
         modeRow.revalidate()
@@ -727,45 +762,30 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         }, FILTER_DEBOUNCE_MS)
     }
 
-    // endregion
-
-    // region Отметки «просмотрено» --------------------------------------------
-
     private fun toggleReviewedForSelection() {
         val items = selectedNodes()
             .flatMap { ChangesTreeBuilder.filesOf(it) }
             .distinctBy { review.key(it) }
-        if (review.toggle(items)) renderFiltered()
+        if (review.toggle(items)) renderReviewMarks()
     }
 
     private fun clearReviewed() {
-        if (review.clear()) renderFiltered()
+        if (review.clear()) renderReviewMarks()
     }
-
-    // endregion
-
-    // region Режимы -----------------------------------------------------------
 
     private fun setDisplayMode(mode: HgDisplayMode) {
         displayMode = mode
+        updateRevisionsBarVisibility()
         refresh()
     }
 
     private fun setListMode(mode: HgListMode) {
         if (listMode == mode) return
         listMode = mode
-        if (mode == HgListMode.TODO) {
-            scheduleTodoPolling()
-            if (!busy) scanTodos()
-        } else {
-            todoAlarm.cancelAllRequests()
-            renderFiltered()
-        }
+        fileChangeAlarm.cancelAllRequests()
+        renderFiltered()
+        if (mode == HgListMode.TODO && !busy) scanTodos()
     }
-
-    // endregion
-
-    // region Логика hg --------------------------------------------------------
 
     private fun projectStartDir(): File? {
         val path = project.basePath ?: project.guessProjectDir()?.path ?: return null
@@ -773,203 +793,154 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     }
 
     private fun refresh() {
+        dropPendingScans()
         val start = projectStartDir()
         if (start == null) {
             showStatus("No project directory")
             return
         }
         val customBranch = branchField.text?.trim().orEmpty()
-        if (displayMode == HgDisplayMode.CUSTOM_BRANCH && customBranch.isEmpty()) {
+        if (displayMode.usesBranchField && customBranch.isEmpty()) {
             sourceFiles.clear(); renderFiltered()
             showStatus("Error: Branch name cannot be empty.")
             return
         }
 
-        setBusy(true)
+        beginTask()
         showStatus("Loading…")
         val mode = displayMode
         val untracked = showUntracked
-        val ownOnly = ownChangesOnly
+        val requestId = ++refreshId
+
+        val trace = newTrace(mode)
 
         ApplicationManager.getApplication().executeOnPooledThread {
-            val repoRoot = HgCommandRunner.findRepoRoot(start)
-            if (repoRoot == null) {
-                onEdt { setBusy(false); showStatus("No repo found") }
-                return@executeOnPooledThread
-            }
-            val runner = HgCommandRunner(repoRoot)
-            val result = computeChanges(runner, mode, customBranch, untracked, ownOnly)
+            try {
+                val repoRoot = trace.timed("find repo root") { HgCommandRunner.findRepoRoot(start) }
+                if (repoRoot == null) {
+                    onEdt { if (requestId == refreshId) showStatus("No repo found") }
+                    return@executeOnPooledThread
+                }
+                val result = ChangesLoader(
+                    HgCommands.of(HgCommandRunner(repoRoot, trace)),
+                    jobs,
+                    settings::revisionOverrides,
+                    LOG::warn
+                ).load(mode, customBranch, untracked, trace)
 
-            onEdt {
-                setBusy(false)
-                currentRepoRoot = repoRoot
-                // Сбрасываем безусловно: базовая ревизия записывается символически (`.`),
-                // и после коммита то же выражение указывает уже на другое содержимое —
-                // по одному лишь ключу устаревшую запись не отличить.
-                baseContentCache.clear()
-                currentBaseRev = result.targetRev
-                sourceFiles.clear()
-                if (result.error != null) {
-                    showStatus(result.error)
-                } else {
-                    sourceFiles.addAll(result.files)
-                    showStatus(result.statusText)
+                onEdt {
+                    if (requestId != refreshId) return@onEdt
+                    comparison = ComparisonState(repoRoot, result.targetRev, mode, result.revsByFile)
+                    baseContentCache.clear()
+                    partialDiff.clear()
+                    lastActivatedPath = ""
+                    if (mode.usesRevisions) {
+                        currentBranchName = result.branch
+                        branchRevisions = result.revisions
+                        revisionSelection = result.selection
+                        revisionsBar.update(branchRevisions, revisionSelection)
+                    }
+                    updateRevisionsBarVisibility()
+                    sourceFiles.clear()
+                    if (result.error != null) {
+                        showStatus(result.error)
+                    } else {
+                        sourceFiles.addAll(result.files)
+                        showStatus(result.statusText)
+                    }
+                    trace.timed("publish statuses") { publishStatuses() }
+                    if (listMode == HgListMode.TODO) scanTodos(trace) else renderFiltered(trace)
+                    openRequestedDiff()
+                    trace.timed("reload open diffs") {
+                        val signature = comparisonSignature()
+                        if (signature != lastComparison) {
+                            lastComparison = signature
+                            project.service<HgChangesService>().reloadOpenDiffs()
+                        }
+                    }
+                    if (result.error == null && result.files.isNotEmpty()) {
+                        loadDiffStats(repoRoot, result.targetRev, result.statsRanges, result.statsPaths, trace)
+                    } else {
+                        report(trace)
+                    }
                 }
-                publishStatuses()
-                if (listMode == HgListMode.TODO) scanTodos() else renderFiltered()
-                if (result.error == null && result.files.isNotEmpty()) {
-                    loadDiffStats(repoRoot, result.targetRev)
-                }
+            } finally {
+                onEdt { endTask() }
             }
         }
     }
 
-    /**
-     * Догружает `+N −M` отдельно от списка: дифф целой ветки считается секундами,
-     * и ждать его, прежде чем показать файлы, незачем.
-     */
-    private fun loadDiffStats(repoRoot: File, targetRev: String) {
+    private fun dropPendingScans() {
+        statsRequestId++
+        statsPending = false
+        todoScanId++
+        todoRescanPending = false
+        pendingChangedPaths.clear()
+        fileChangeAlarm.cancelAllRequests()
+    }
+
+    private fun loadDiffStats(
+        repoRoot: File,
+        targetRev: String,
+        ranges: List<DiffRange>,
+        paths: Map<DiffRange, List<String>>,
+        trace: LoadTrace? = null
+    ) {
         val requestId = ++statsRequestId
         statsPending = true
         updateSummary(shownFiles())
+        val statJobs = ranges.ifEmpty { listOf(DiffRange(targetRev, "")) }
+        val ignoreEolChanges = HgSettings.ignoreEolChanges
 
         ApplicationManager.getApplication().executeOnPooledThread {
-            val (exit, bytes) = HgCommandRunner(repoRoot).runToBytes(listOf("diff", "--git", "--rev", targetRev))
-            val stats = if (exit == 0) HgDiffStatParser.parse(bytes) else emptyMap()
-            onEdt {
-                if (requestId != statsRequestId) return@onEdt // пришёл более свежий refresh
-                statsPending = false
-                for (i in sourceFiles.indices) {
-                    val item = sourceFiles[i]
-                    val stat = stats[HgPaths.normalize(item.path)]
-                    val unchanged = item.status == "M" && stat == null
-                    sourceFiles[i] = item.copy(
-                        status = if (unchanged) UNCHANGED_STATUS else item.status,
-                        isUnchanged = unchanged,
-                        added = stat?.added ?: 0,
-                        removed = stat?.removed ?: 0
-                    )
+            try {
+                val runner = HgCommandRunner(repoRoot, trace)
+                val stats = LinkedHashMap<DiffRange, Map<String, HgDiffStat>>()
+                trace.timed("diff stats") {
+                    jobs.map(statJobs) { range ->
+                        val res = runner.runToBytesDetailed(
+                            DiffStatsPlan.arguments(range, paths[range].orEmpty(), ignoreEolChanges)
+                        )
+                        if (res.exitCode == 0) {
+                            range to HgDiffStatParser.parse(res.stdout)
+                        } else {
+                            LOG.warn("Diff stats are unavailable: ${HgFailure.message(res.failedToStart, res.stderr)}")
+                            range to emptyMap()
+                        }
+                    }.forEach { (range, byPath) -> stats[range] = byPath }
                 }
-                publishStatuses()
-                if (listMode == HgListMode.FILES) renderFiltered()
+                onEdt {
+                    if (requestId != statsRequestId) return@onEdt
+                    statsPending = false
+                    trace.timed("apply stats") {
+                        val counted = DiffStatsPlan.applyStats(sourceFiles, stats, targetRev)
+                        sourceFiles.clear()
+                        sourceFiles.addAll(counted)
+                        publishStatuses()
+                    }
+                    if (listMode == HgListMode.FILES) {
+                        renderFiltered(trace, reuseTree = true)
+                    } else {
+                        updateSummary(shownFiles())
+                    }
+                    report(trace)
+                }
+            } finally {
+                onEdt {
+                    if (requestId == statsRequestId && statsPending) {
+                        statsPending = false
+                        updateSummary(shownFiles())
+                    }
+                }
             }
         }
     }
 
-    /**
-     * Hands the current statuses to [HgFileStatusService], which puts them into editor tab
-     * titles. Called after the stats pass as well: only there does an `M` with an empty diff
-     * turn into [UNCHANGED_STATUS].
-     */
     private fun publishStatuses() {
-        val repoRoot = currentRepoRoot ?: return
+        comparison = comparison.withItems(sourceFiles)
+        val repoRoot = comparison.repoRoot ?: return
         project.service<HgFileStatusService>().update(repoRoot, sourceFiles)
     }
-
-    private class ChangesResult(
-        val files: List<HgFileItem>,
-        val targetRev: String,
-        val statusText: String,
-        val error: String?
-    )
-
-    private fun computeChanges(
-        runner: HgCommandRunner,
-        mode: HgDisplayMode,
-        customBranch: String,
-        untracked: Boolean,
-        ownChangesOnly: Boolean
-    ): ChangesResult {
-        val targetRev = when (mode) {
-            HgDisplayMode.CUSTOM_BRANCH -> customBranch
-            HgDisplayMode.BRANCH -> BRANCH_START_REV
-            HgDisplayMode.UNCOMMITTED -> "."
-        }
-
-        // The branch mode is limited to the files its own revisions touched: otherwise a parent
-        // merged into the branch shows up as the branch's own work. `VS` compares everything.
-        val scope = if (mode == HgDisplayMode.BRANCH) branchScope(runner, ownChangesOnly) else null
-
-        val template = StatusTextFormatter.REVISION_TEMPLATE
-        val currentInfo = runner.run("log", "-r", ".", "--template", template)
-            .stdout.ifBlank { StatusTextFormatter.UNKNOWN_REVISION }
-        val baseInfo = runner.run("log", "-r", targetRev, "--template", template)
-            .stdout.ifBlank { StatusTextFormatter.UNKNOWN_REVISION }
-
-        val statusRes = runner.run(
-            "status", "--rev", targetRev,
-            HgStatusParser.statusFlags(untracked), HgStatusParser.COPIES_FLAG
-        )
-        if (!statusRes.success) {
-            return ChangesResult(emptyList(), targetRev, "", statusError(mode, statusRes.stderr))
-        }
-
-        // Статусы показываем сразу, а +/- догружает loadDiffStats — дифф ветки слишком долгий.
-        val all = HgStatusParser.foldRenames(HgStatusParser.parse(statusRes.stdout))
-        val files = if (scope == null) all else all.filter { inScope(it, scope) }
-        return ChangesResult(files, targetRev, StatusTextFormatter.branchInfo(mode, currentInfo, baseInfo), null)
-    }
-
-    private fun inScope(item: HgFileItem, scope: Set<String>): Boolean =
-        HgPaths.key(item.path) in scope || (item.copiedFrom.isNotEmpty() && HgPaths.key(item.copiedFrom) in scope)
-
-    /**
-     * Файлы, которых касались собственные ревизии ветки, — то же множество, что показывает
-     * Upsource для ревью «первая ревизия ветки … текущая». У ревизии слияния `{files}` содержит
-     * только то, что правилось при слиянии, поэтому разрешение конфликтов в список попадает,
-     * а просто влитые из родителя файлы — нет.
-     *
-     * `null` — множество получить не удалось (корневая ветка, ошибка hg): тогда список не
-     * ограничиваем, это лучше пустого окна.
-     */
-    private fun branchOwnFiles(runner: HgCommandRunner): Set<String>? {
-        val r = runner.run("log", "-r", BRANCH_REVS, "--template", "{join(files, '\\n')}\\n")
-        if (!r.success) return null
-        return BranchScope.ownFiles(r.stdout).ifEmpty { null }
-    }
-
-    /**
-     * Множество файлов режима `Base`: собственные файлы ветки, при включённом
-     * [ownChangesOnly] — суженные до тех, куда ветка положила своё содержимое.
-     */
-    private fun branchScope(runner: HgCommandRunner, ownChangesOnly: Boolean): Set<String>? {
-        val own = branchOwnFiles(runner) ?: return null
-        if (!ownChangesOnly) return own
-        val contributed = branchContributedFiles(runner) ?: return own
-        return BranchScope.narrow(own, contributed)
-    }
-
-    /**
-     * Файлы, содержимое которых на конце ветки отличается от родительской ветки: дифф
-     * относительно точки слияния. Именно он отделяет свои правки от влитых — см. [BranchScope].
-     *
-     * Дифф считается по байтам и стоит меньше диффа от точки ответвления: расходятся ветки
-     * обычно куда меньше, чем ветка успела наработать. `null` — hg не ответил, тогда сужение
-     * просто не применяется.
-     */
-    private fun branchContributedFiles(runner: HgCommandRunner): Set<String>? {
-        val (exit, bytes) = runner.runToBytes(listOf("diff", "--git", "--rev", MERGE_BASE_REV))
-        if (exit != 0) return null
-        return BranchScope.contributedFiles(HgDiffStatParser.parse(bytes).keys)
-    }
-
-    /** A root branch has no parent and `hg status --rev` fails — point at a mode that works. */
-    private fun statusError(mode: HgDisplayMode, stderr: String): String {
-        val rootBranch = mode == HgDisplayMode.BRANCH &&
-            // "empty revision range" is what the revset answers on a branch without a parent.
-            (stderr.contains("revision 0") || stderr.contains("unknown revision") ||
-                stderr.contains("empty revision"))
-        return if (rootBranch) {
-            "ROOT BRANCH DETECTED (No Parent). Use '${HgDisplayMode.UNCOMMITTED.title}'.\nDetails: " +
-                stderr.trim()
-        } else {
-            "HG Error: " + stderr.trim()
-        }
-    }
-
-    // endregion
-
-    // region Отрисовка дерева -------------------------------------------------
 
     private fun shownFiles(): List<HgFileItem> {
         val filter = PathFilter(filterField.text.orEmpty(), excludeField.text.orEmpty())
@@ -977,17 +948,62 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             .filter { (showUnchanged || !it.isUnchanged) && filter.accepts(it.path) }
     }
 
-    private fun renderFiltered() {
-        // Дерево пересобирается целиком, а отметка «просмотрено» перестраивает его на
-        // каждый файл — без восстановления выделение слетало бы на каждом шаге ревью.
+    private fun renderReviewMarks() = renderFiltered(reuseTree = true)
+
+    private fun renderFiltered(trace: LoadTrace? = null, reuseTree: Boolean = false) {
+        val items = trace.timed("filter files") { shownFiles() }
+        if (reuseTree && TreeRefreshPlan.keepsStructure(renderedFiles, items)) {
+            renderedFiles = items
+            trace.timed("refresh tree") {
+                ChangesTreeBuilder.refresh(renderedRoot, items, review::isReviewed)
+                tree.repaint()
+                updateSummary(items)
+            }
+            return
+        }
         val selected = selectedFileKeys()
-        val items = shownFiles()
-        val newRoot = ChangesTreeBuilder.build(items, review::isReviewed)
-        treeModel.setRoot(newRoot)
-        applyColumnWidths()
-        TreeUtil.expandAll(tree.tree)
-        restoreSelection(selected)
-        updateSummary(items)
+        val collapsed = collapsedDirs()
+        val newRoot = trace.timed("build tree") { ChangesTreeBuilder.build(items, review::isReviewed) }
+        trace.timed("show tree") {
+            renderedFiles = items
+            renderedRoot = newRoot
+            treeModel.setRoot(newRoot)
+            applyColumnWidths()
+            restoreExpansion(collapsed)
+            restoreSelection(selected)
+            updateSummary(items)
+        }
+    }
+
+    private fun collapsedDirs(): Set<String>? {
+        if (renderedRoot.childCount == 0) return null
+        val collapsed = HashSet<String>()
+        for (row in 0 until tree.tree.rowCount) {
+            val path = tree.tree.getPathForRow(row) ?: continue
+            val node = path.lastPathComponent as? DefaultMutableTreeNode ?: continue
+            if (node.userObject !is DirNode) continue
+            if (!tree.tree.isExpanded(path)) collapsed.add(TreeRefreshPlan.dirPath(node))
+        }
+        return collapsed
+    }
+
+    private fun restoreExpansion(collapsed: Set<String>?) {
+        if (collapsed == null) {
+            TreeUtil.expandAll(tree.tree)
+            return
+        }
+        expandDirs(renderedRoot, TreePath(renderedRoot), collapsed)
+    }
+
+    private fun expandDirs(node: DefaultMutableTreeNode, path: TreePath, collapsed: Set<String>) {
+        for (index in 0 until node.childCount) {
+            val child = node.getChildAt(index) as DefaultMutableTreeNode
+            if (child.userObject !is DirNode) continue
+            if (!TreeRefreshPlan.expandsAfterRebuild(TreeRefreshPlan.dirPath(child), collapsed)) continue
+            val childPath = path.pathByAddingChild(child)
+            tree.tree.expandPath(childPath)
+            expandDirs(child, childPath, collapsed)
+        }
     }
 
     private fun selectedFileKeys(): Set<String> = tree.selectedRows.toList()
@@ -1004,18 +1020,6 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         }
     }
 
-    /** Выделяет файл и подкручивает к нему список — панель показывает, где вы находитесь. */
-    private fun selectFile(item: HgFileItem) {
-        val key = HgPaths.key(item.path)
-        for (row in 0 until tree.rowCount) {
-            val payload = (nodeAt(row)?.userObject as? FileNode)?.item ?: continue
-            if (HgPaths.key(payload.path) != key) continue
-            tree.selectionModel.setSelectionInterval(row, row)
-            tree.scrollRectToVisible(tree.getCellRect(row, 0, true))
-            return
-        }
-    }
-
     private fun updateSummary(items: List<HgFileItem>) {
         val files = items.distinctBy { review.key(it) }
         summaryLabel.text =
@@ -1027,36 +1031,98 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         branchLabel.toolTipText = text
     }
 
-    // endregion
-
-    // region TODO -------------------------------------------------------------
-
-    private fun scheduleTodoPolling() {
-        todoAlarm.cancelAllRequests()
-        todoAlarm.addRequest({
-            if (!busy && listMode == HgListMode.TODO) scanTodos()
-            if (listMode == HgListMode.TODO) scheduleTodoPolling()
-        }, TODO_POLL_MS)
+    private fun watchDocumentsForTodos() {
+        EditorFactory.getInstance().eventMulticaster.addDocumentListener(
+            object : DocumentListener {
+                override fun documentChanged(event: EditorDocumentEvent) {
+                    if (listMode != HgListMode.TODO) return
+                    val repoRoot = comparison.repoRoot ?: return
+                    val file = FileDocumentManager.getInstance().getFile(event.document) ?: return
+                    if (!TodoScan.covers(sourceFiles, repoRoot.absolutePath, file.path)) return
+                    todoRescanPending = true
+                    scheduleFileChangeReaction()
+                }
+            },
+            this
+        )
     }
 
-    private fun scanTodos() {
-        val repoRoot = currentRepoRoot ?: return
+    private fun watchFilesForChanges() {
+        project.messageBus.connect(this).subscribe(
+            VirtualFileManager.VFS_CHANGES,
+            object : BulkFileListener {
+                override fun after(events: List<VFileEvent>) {
+                    val paths = changedPathsOf(events)
+                    if (paths.isEmpty()) return
+                    pendingChangedPaths.addAll(paths)
+                    onEdt { scheduleFileChangeReaction() }
+                }
+            }
+        )
+    }
+
+    private fun changedPathsOf(events: List<VFileEvent>): List<String> = events.flatMap { event ->
+        when (event) {
+            is VFileContentChangeEvent, is VFileDeleteEvent,
+            is VFileCreateEvent, is VFileCopyEvent -> listOf(event.path)
+            is VFileMoveEvent -> listOf(event.oldPath, event.newPath)
+            is VFilePropertyChangeEvent ->
+                if (event.propertyName == VirtualFile.PROP_NAME) listOf(event.oldPath, event.newPath)
+                else emptyList()
+            else -> emptyList()
+        }
+    }
+
+    private fun scheduleFileChangeReaction() {
+        fileChangeAlarm.cancelAllRequests()
+        fileChangeAlarm.addRequest({ reactToChangedFiles() }, FILE_CHANGE_DELAY_MS)
+    }
+
+    private fun reactToChangedFiles() {
+        val paths = takePendingChangedPaths()
+        val rescanRequested = todoRescanPending
+        todoRescanPending = false
+        val repoRoot = comparison.repoRoot
+        val reaction = if (repoRoot == null) FileChangeReaction.NONE else FileChangeScope.of(
+            repoRoot.absolutePath,
+            paths,
+            sourceFiles,
+            project.service<HgDiffTabManager>().openChangesKeys()
+        )
+        if (reaction.diffKeys.isNotEmpty()) {
+            project.service<HgDiffTabManager>().reloadChangesTabs(reaction.diffKeys)
+        }
+        if (!rescanRequested && !reaction.rescanTodos) return
+        if (!busy && listMode == HgListMode.TODO) scanTodos()
+    }
+
+    private fun takePendingChangedPaths(): List<String> = synchronized(pendingChangedPaths) {
+        val paths = ArrayList(pendingChangedPaths)
+        pendingChangedPaths.clear()
+        paths
+    }
+
+    private fun scanTodos(trace: LoadTrace? = null) {
+        val repoRoot = comparison.repoRoot ?: return
         val sources = ArrayList(sourceFiles)
+        val requestId = ++todoScanId
         ApplicationManager.getApplication().executeOnPooledThread {
             val todoItems = ArrayList<HgFileItem>()
-            for (source in sources) {
-                val text = readFileText(File(repoRoot, source.path))
-                todoItems.addAll(TodoParser.parse(source, text))
+            trace.timed("scan todos") {
+                for (source in sources) {
+                    val text = readFileText(File(repoRoot, source.path))
+                    todoItems.addAll(TodoParser.parse(source, text))
+                }
             }
             onEdt {
-                if (listMode != HgListMode.TODO) return@onEdt
+                if (requestId != todoScanId || listMode != HgListMode.TODO) return@onEdt
+                if (!TodoScan.changed(currentTodoItems, todoItems)) return@onEdt
                 currentTodoItems = todoItems
-                renderFiltered()
+                renderFiltered(trace)
             }
         }
     }
 
-    /** Текст берём из документа, если файл открыт: несохранённые TODO иначе не видны. */
     private fun readFileText(fullPath: File): String {
         val vf = LocalFileSystem.getInstance().findFileByIoFile(fullPath)
         if (vf != null) {
@@ -1074,229 +1140,328 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         }
     }
 
-    // endregion
-
-    // region Действия ---------------------------------------------------------
-
     private fun openFile(item: HgFileItem) {
-        val repoRoot = currentRepoRoot ?: return
+        val repoRoot = comparison.repoRoot ?: return
         val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(File(repoRoot, item.path)) ?: return
-        // Открываем сами — слежение за редактором иначе примет это за второе открытие
-        // и повторит дифф с отметкой.
-        // Первый щелчок двойного клика уже заказал дифф — снимаем его, иначе он
-        // придёт из фонового потока следом и перебьёт только что открытый файл.
-        diffRequestId++
-        if (item.lineNumber > 0) {
-            OpenFileDescriptor(project, vf, item.lineNumber - 1, 0).navigate(true)
-        } else {
-            FileEditorManager.getInstance(project).openFile(vf, true)
-        }
-        if (settings.markReviewedOnOpen && review.set(listOf(item), true)) renderFiltered()
-    }
-
-    /**
-     * Показывает дифф файла в редакторе. Вкладка переиспользуется, фокус остаётся
-     * в дереве. Новые (A/?) и удалённые (R/!) файлы сравниваются с пустой стороной.
-     */
-    private fun diffFile(item: HgFileItem) {
-        val repoRoot = currentRepoRoot ?: return
-        val localFile = File(repoRoot, item.path)
-        // У переименования и копии базовая сторона есть — она лежит под старым именем.
-        val isNew = (item.status == "A" || item.status == "?") && item.copiedFrom.isEmpty()
-        val hasBaseRev = currentBaseRev.isNotEmpty() && currentBaseRev != "null"
-        // Устаревший ответ не должен перекрыть свежий, даже если сами мы ничего не ждём.
-        val requestId = ++diffRequestId
-
-        // У новых и неотслеживаемых базовой стороны нет — спрашивать hg не о чем.
-        if (isNew || !hasBaseRev) {
-            showDiff(item, localFile, null)
-            return
-        }
-
-        // Уже читали это содержимое — показываем сразу, без запуска hg и без мигания вкладки.
-        val key = HgContentCache.key(currentBaseRev, item.basePath)
-        baseContentCache.get(key)?.let {
-            showDiff(item, localFile, it.text)
-            return
-        }
-
-        val baseRev = currentBaseRev
-        ApplicationManager.getApplication().executeOnPooledThread {
-            val base = readBase(repoRoot, baseRev, item.basePath)
-            onEdt {
-                if (requestId != diffRequestId) return@onEdt // пришёл более свежий клик
-                showDiff(item, localFile, base)
+        project.service<HgChangesService>().openAsFile(vf.path)
+        val line = CaretTransfer.fileTarget(null, item.lineNumber)
+        NavigationHistory.record(project) {
+            if (line != null) {
+                OpenFileDescriptor(project, vf, line, 0).navigate(true)
+            } else {
+                FileEditorManager.getInstance(project).openFile(vf, true)
             }
         }
+        if (settings.markReviewedOnOpen && review.set(listOf(item), true)) renderReviewMarks()
     }
 
-    /** Содержимое файла на базовой ревизии, с укладкой в кэш. Зовётся из фонового потока. */
-    private fun readBase(repoRoot: File, baseRev: String, path: String): String? {
-        val key = HgContentCache.key(baseRev, path)
-        baseContentCache.get(key)?.let { return it.text }
-        val (exit, bytes) = HgCommandRunner(repoRoot).runToBytes(listOf("cat", "-r", baseRev, path))
-        val text = if (exit == 0) HgOutputDecoder.decode(bytes) else null
-        baseContentCache.put(key, text)
-        return text
+    private fun openRequestedDiff() {
+        val service = project.service<HgChangesService>()
+        val requested = service.takeRequestedDiff() ?: return
+        val repoRoot = comparison.repoRoot ?: return
+        val key = HgPaths.keyRelativeTo(requested.path, repoRoot) ?: return
+        val item = comparison.changedItemAt(key) ?: return
+        selectOpenedFile(requested.path)
+        NavigationHistory.record(project) {
+            service.openDiffTab(
+                File(repoRoot, item.path).path,
+                key,
+                null,
+                requested.caretLine,
+                requestFocus = true
+            )
+        }
     }
 
-    /**
-     * Читает базовое содержимое соседних строк заранее. При ходьбе стрелками следующий
-     * дифф к моменту нажатия уже готов — иначе каждый шаг упирается в старт hg.
-     */
-    private fun prefetchAround(row: Int) {
-        val repoRoot = currentRepoRoot ?: return
-        val baseRev = currentBaseRev
-        if (baseRev.isEmpty() || baseRev == "null") return
+    fun reloadForSettings(changesetsOnly: Boolean) {
+        if (changesetsOnly && !displayMode.isChangesets) return
+        onEdt { refresh() }
+    }
 
-        val paths = PREFETCH_OFFSETS
-            .map { row + it }
-            .filter { it >= 0 }
-            .mapNotNull { (nodeAt(it)?.userObject as? FileNode)?.item }
-            .filter { !it.isTodoItem && (it.copiedFrom.isNotEmpty() || (it.status != "A" && it.status != "?")) }
-            .map { it.basePath }
-        if (paths.isEmpty()) return
+    fun isLoaded(): Boolean = comparison.repoRoot != null
+
+    fun hasDiffFor(file: VirtualFile): Boolean = itemFor(file) != null
+
+    fun diffTabKeyOf(file: VirtualFile): String? = itemFor(file)?.let { HgPaths.key(it.path) }
+
+    fun buildDiffRequestForPath(path: String): SimpleDiffRequest? {
+        val state = comparison
+        val repoRoot = state.repoRoot ?: return null
+        val key = HgPaths.keyRelativeTo(path, repoRoot) ?: return null
+        val item = state.changedItemAt(key) ?: return null
+        val localFile = File(repoRoot, item.path)
+        val baseRev = item.baseRev.ifEmpty { state.baseRev }
+        return buildRequest(item, localFile, baseRev, computeSides(repoRoot, item, baseRev))
+    }
+
+    private fun itemFor(file: VirtualFile): HgFileItem? {
+        if (file.isDirectory || !file.isInLocalFileSystem) return null
+        val state = comparison
+        val repoRoot = state.repoRoot ?: return null
+        val key = HgPaths.keyRelativeTo(file.path, repoRoot) ?: return null
+        return state.changedItemAt(key)
+    }
+
+    private class Sides(
+        val base: String?,
+        val head: String?,
+        val onlyLast: Boolean = false,
+        val skippedHunks: Int = 0
+    )
+
+    private fun computeSides(repoRoot: File, item: HgFileItem, baseRev: String): Sides {
+        val plan = DiffSidesPlan.of(item, baseRev)
+        val builder = baseBuilder(repoRoot, comparison)
+        var base = if (plan.needsBase) builder.readRevision(plan.baseRev, plan.basePath) else null
+        var head: String? = null
+        var onlyLast = false
+        if (plan.rightIsRevision) {
+            head = builder.readRevision(plan.headRev, plan.headPath)
+            val before = if (plan.needsBase) branchBase(builder, item, head) else null
+            if (plan.needsBase && before == null) {
+                onlyLast = true
+                base = builder.readRevision(plan.lastChangeBaseRev, plan.headPath)
+            } else {
+                base = before
+            }
+        }
+        return Sides(base, head, onlyLast, partialDiff[HgPaths.key(item.path)] ?: 0)
+    }
+
+    private fun baseBuilder(repoRoot: File, state: ComparisonState): BranchBaseBuilder = BranchBaseBuilder(
+        HgCommands.of(HgCommandRunner(repoRoot)),
+        baseContentCache,
+        state,
+        FragmentSettings(
+            HgSettings.widenToFragments,
+            HgSettings.changesetsFragments == ChangesetsFragments.HG,
+            changesetsStamp()
+        ),
+        lineComparator,
+        LOG::warn
+    )
+
+    private fun branchBase(builder: BranchBaseBuilder, item: HgFileItem, head: String?): String? {
+        val base = builder.read(item, head)
+        val fileKey = HgPaths.key(item.path)
+        base.skippedHunks?.let {
+            if (it > 0) partialDiff[fileKey] = it else partialDiff.remove(fileKey)
+        }
+        return base.text
+    }
+
+    private fun diffFile(item: HgFileItem) {
+        val repoRoot = comparison.repoRoot ?: return
+        val localFile = File(repoRoot, item.path)
+        NavigationHistory.record(project) {
+            project.service<HgChangesService>()
+                .openDiffTab(localFile.path, HgPaths.key(item.path), tree)
+        }
+    }
+
+    private fun compareLines(left: String, right: String, policy: ComparisonPolicy): List<DiffFragment> =
+        ComparisonManager.getInstance()
+            .compareLines(left, right, policy, DumbProgressIndicator.INSTANCE)
+            .map {
+                DiffFragment(
+                    LineRange(it.startLine1, it.endLine1),
+                    LineRange(it.startLine2, it.endLine2)
+                )
+            }
+
+    private fun fragmentPolicy(): ComparisonPolicy = when (HgSettings.changesetsFragments) {
+        ChangesetsFragments.PLATFORM_TRIMMED -> ComparisonPolicy.TRIM_WHITESPACES
+        ChangesetsFragments.PLATFORM_SETTINGS -> viewerPolicy()
+        else -> ComparisonPolicy.DEFAULT
+    }
+
+    private fun comparisonSignature(): String =
+        ComparisonSignature.of(sourceFiles, comparison.mode, comparison.baseRev, changesetsStamp())
+
+    private fun changesetsStamp(): String = ComparisonSignature.fragmentsStamp(
+        HgSettings.widenToFragments, HgSettings.changesetsFragments, fragmentPolicy().name
+    )
+
+    private fun viewerPolicy(): ComparisonPolicy =
+        TextDiffSettingsHolder.TextDiffSettings.getSettings().ignorePolicy.comparisonPolicy
+
+    private fun prefetchAround(activated: HgFileItem) {
+        val state = comparison
+        val repoRoot = state.repoRoot ?: return
+
+        val items = PrefetchPlan.around(visibleFiles(), FileKeys.of(activated), FileKeys::of)
+            .filterNot { it.isTodoItem }
+        if (items.isEmpty()) return
 
         val requestId = ++prefetchId
         ApplicationManager.getApplication().executeOnPooledThread {
-            for (path in paths) {
-                // Пользователь уже ушёл в другое место списка — дочитывать незачем.
+            val builder = baseBuilder(repoRoot, state)
+            for (item in items) {
                 if (requestId != prefetchId) return@executeOnPooledThread
-                readBase(repoRoot, baseRev, path)
+                val plan = DiffSidesPlan.of(item, state.baseRev)
+                if (!plan.rightIsRevision) {
+                    if (plan.needsBase) builder.readRevision(plan.baseRev, plan.basePath)
+                    continue
+                }
+                val head = builder.readRevision(plan.headRev, plan.headPath)
+                if (plan.needsBase) branchBase(builder, item, head)
             }
         }
     }
 
-    private fun showDiff(item: HgFileItem, localFile: File, base: String?) {
+    private fun buildRequest(
+        item: HgFileItem,
+        localFile: File,
+        panelBaseRev: String,
+        sides: Sides
+    ): SimpleDiffRequest? {
+        val base = sides.base
+        val head = sides.head
+        val onlyLast = sides.onlyLast
+        val skippedHunks = sides.skippedHunks
         val factory = DiffContentFactory.getInstance()
         val fileType = FileTypeManager.getInstance().getFileTypeByFileName(localFile.name)
         val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(localFile)
+        val plan = DiffSidesPlan.of(item, panelBaseRev)
+        val baseRev = if (onlyLast) plan.lastChangeBaseRev else panelBaseRev
+        val fromRevision = plan.rightIsRevision
 
-        if (base == null && vf == null) {
-            showStatus("Nothing to diff: ${item.path}")
-            return
+        if (base == null && head == null && vf == null) return null
+
+        val rightIsLocalFile = if (fromRevision) vf != null && head != null && localMatches(vf, head)
+        else vf != null
+        val baseContent = if (base != null) revisionContent(base, vf, fileType) else factory.createEmpty()
+        val rightContent = when {
+            fromRevision -> when {
+                head == null -> factory.createEmpty()
+                rightIsLocalFile -> factory.create(project, vf!!)
+                else -> revisionContent(head, vf, fileType)
+            }
+            vf != null -> factory.create(project, vf)
+            else -> factory.createEmpty()
         }
+        val baseTitle = DiffTitles.left(base != null, fromRevision, onlyLast, baseRev, item.copiedFrom)
+        val rightTitle = DiffTitles.right(
+            fromRevision, onlyLast, head != null, rightIsLocalFile, vf != null,
+            item.headRev, skippedHunks
+        )
 
-        val baseContent = if (base != null) factory.create(project, base, fileType) else factory.createEmpty()
-        val localContent = if (vf != null) factory.create(project, vf) else factory.createEmpty()
-        // У переименования в заголовке базовой стороны — старый путь: иначе по вкладке
-        // не понять, с чем именно сравнивают.
-        val baseName = if (item.copiedFrom.isNotEmpty()) " ${item.copiedFrom}" else ""
-        val baseTitle = if (base != null) "Hg Base ($currentBaseRev)$baseName" else "Not in base"
-        val localTitle = if (vf != null) "Local Version" else "Deleted locally"
-
-        val name = localFile.name
-        val key = "$currentBaseRev|${item.path}"
-
-        // Вкладками владеет общий менеджер: иначе это окно и Hg File History держат каждое
-        // свою вкладку, и на экране оказывается два диффа сразу.
-        val request = SimpleDiffRequest(name, baseContent, localContent, baseTitle, localTitle)
-        project.service<HgDiffTabManager>()
-            .show(HgDiffTabManager.OWNER_CHANGES, key, name, request, tree, localFile.path)
+        val request = SimpleDiffRequest(localFile.name, baseContent, rightContent, baseTitle, rightTitle)
+        request.putUserData(DiffUserDataKeys.PREFERRED_FOCUS_SIDE, Side.RIGHT)
+        project.service<HgChangesService>().takePendingLine(localFile.path)?.let { line ->
+            request.putUserData(
+                DiffUserDataKeys.SCROLL_TO_LINE,
+                Pair.create(Side.RIGHT, line)
+            )
+        }
+        return request
     }
 
+    private fun localMatches(file: VirtualFile, text: String): Boolean {
+        val document = ReadAction.compute<Document?, RuntimeException> {
+            FileDocumentManager.getInstance().getDocument(file)
+        }
+        if (document == null) {
+            LOG.info("Hg diff: no document for ${file.path}, right side falls back to the revision")
+            return false
+        }
+        val local = ReadAction.compute<String, RuntimeException> { document.text }
+        if (local == text) return true
+        LOG.info(
+            "Hg diff: ${file.path} differs from the revision, right side falls back to it. " +
+                TextMismatch.describe(local, text)
+        )
+        return false
+    }
+
+    private fun revisionContent(text: String, file: VirtualFile?, fileType: FileType) =
+        if (file != null) DiffContentFactory.getInstance().create(project, text, file)
+        else DiffContentFactory.getInstance().create(project, text, fileType)
+
     private fun revertSelected() {
-        val repoRoot = currentRepoRoot ?: return
+        val state = comparison
+        val repoRoot = state.repoRoot ?: return
         val selected = selectedNodes()
             .flatMap { ChangesTreeBuilder.filesOf(it) }
             .distinctBy { it.path }
         if (selected.isEmpty()) return
         if (!confirmRevert(selected)) return
 
-        setBusy(true)
-        val mode = displayMode
-        val baseRev = currentBaseRev
+        beginTask()
+        val mode = state.mode
+        val baseRev = state.baseRev
         ApplicationManager.getApplication().executeOnPooledThread {
-            val runner = HgCommandRunner(repoRoot)
-            val args = ArrayList<String>()
-            args.add("revert"); args.add("--no-backup")
-            if (mode != HgDisplayMode.UNCOMMITTED) {
-                args.add("-r"); args.add(baseRev)
-            }
-            // Переименование откатываем вместе с источником: иначе старый путь останется
-            // удалённым, а восстановится только новое имя.
-            selected.forEach { args.add(it.path); if (it.copiedFrom.isNotEmpty()) args.add(it.copiedFrom) }
-            val result = runner.run(args)
+            try {
+                val runner = HgCommandRunner(repoRoot)
+                val result = runner.runToText(RevertPlan.arguments(selected, mode, baseRev))
 
-            val ioFiles = selected.flatMap { item ->
-                listOfNotNull(File(repoRoot, item.path), item.copiedFrom.takeIf { it.isNotEmpty() }?.let { File(repoRoot, it) })
-            }
-            onEdt {
-                LocalFileSystem.getInstance().refreshIoFiles(ioFiles)
-                setBusy(false)
-                if (!result.success && result.stderr.isNotBlank()) {
-                    Messages.showErrorDialog(project, "Revert failed: ${result.stderr}", "Error")
-                } else {
-                    refresh()
+                val ioFiles = RevertPlan.affectedPaths(selected).map { File(repoRoot, it) }
+                onEdt {
+                    LocalFileSystem.getInstance().refreshIoFiles(ioFiles)
+                    if (!result.success) {
+                        val details = result.stderr.ifBlank { "exit code ${result.exitCode}" }
+                        Messages.showErrorDialog(
+                            project,
+                            "Revert failed. ${HgFailure.message(result.failedToStart, details)}",
+                            "Error"
+                        )
+                    } else {
+                        refresh()
+                    }
                 }
+            } finally {
+                onEdt { endTask() }
             }
         }
     }
 
-    private fun confirmRevert(selected: List<HgFileItem>): Boolean {
-        val message = buildString {
-            if (displayMode == HgDisplayMode.UNCOMMITTED) {
-                appendLine("Revert uncommitted changes in ${selected.size} file(s)?")
-            } else {
-                appendLine("Restore ${selected.size} file(s) to the base revision ($currentBaseRev)?")
-                appendLine("Every change made since then, committed or not, will be lost.")
-            }
-            appendLine()
-            selected.take(REVERT_PREVIEW_LIMIT).forEach { appendLine(it.path) }
-            if (selected.size > REVERT_PREVIEW_LIMIT) {
-                appendLine("... and ${selected.size - REVERT_PREVIEW_LIMIT} more")
-            }
-        }
-        return Messages.showYesNoDialog(
-            project, message, "Confirm revert", Messages.getWarningIcon()
-        ) == Messages.YES
-    }
-
-    // endregion
+    private fun confirmRevert(selected: List<HgFileItem>): Boolean = Messages.showYesNoDialog(
+        project,
+        RevertPrompt.text(selected, comparison.mode, comparison.baseRev),
+        "Confirm revert",
+        Messages.getWarningIcon()
+    ) == Messages.YES
 
     private fun onEdt(task: () -> Unit) = ApplicationManager.getApplication().invokeLater(task)
 
-    private fun setBusy(value: Boolean) {
-        busy = value
+    private fun newTrace(mode: HgDisplayMode): LoadTrace? =
+        if (LOG.isDebugEnabled) LoadTrace("${mode.title} load") else null
+
+    private fun report(trace: LoadTrace?) {
+        if (trace != null && LOG.isDebugEnabled) LOG.debug(trace.summary())
+    }
+
+    private fun <T> LoadTrace?.timed(name: String, work: () -> T): T =
+        if (this == null) work() else phase(name, work)
+
+    private fun beginTask() {
+        activeTasks++
+        toolbar?.updateActionsAsync()
+    }
+
+    private fun endTask() {
+        if (activeTasks > 0) activeTasks--
+        toolbar?.updateActionsAsync()
     }
 
     private companion object {
-        /**
-         * Точка ответвления: база режима «вся ветка» и ревизия, по которой определяется имя
-         * родительской ветки. Ровно эту базу берёт Upsource для ревью «первая ревизия ветки …
-         * текущая»: у первой ревизии ветки это и есть первый родитель.
-         */
-        const val BRANCH_START_REV = "p1(first(branch(.)))"
 
-        /**
-         * Последний предок текущей ревизии, лежащий на родительской ветке. Сам по себе базой
-         * не служит, но отделяет собственные ревизии ветки от влитых: после слияния родителя
-         * в ветку его ревизии тоже становятся её предками.
-         */
-        const val MERGE_BASE_REV = "max(ancestors(.) and branch($BRANCH_START_REV))"
+        val LOG = Logger.getInstance(HgChangesPanel::class.java)
 
-        /**
-         * Собственные ревизии ветки — предки текущей, не являющиеся предками точки слияния.
-         * Их файлами ограничивается список: сравнение с точкой ответвления иначе тащит в него
-         * всё, что родительская ветка успела наменять до слияния (889 файлов вместо 89).
-         */
-        const val BRANCH_REVS = "only(., $MERGE_BASE_REV)"
+        val jobs = ParallelJobs(PooledTaskLauncher)
 
-        /** Псевдостатус файла, который числится изменённым, но по диффу отличий не имеет. */
-        const val UNCHANGED_STATUS = "♦"
+        const val REVISIONS_PROPORTION_KEY = "mercurial.revisionsProportion"
+        const val DEFAULT_TREE_PROPORTION = 0.75f
 
         const val FILTER_DEBOUNCE_MS = 500
 
-        /** Пауза, после которой остановка на строке считается выбором файла. */
         const val SELECTION_DEBOUNCE_MS = 250
 
-        /**
-         * Соседние строки, которые дочитываются заранее. Вниз заглядываем дальше, чем
-         * вверх: список просматривают сверху вниз.
-         */
-        val PREFETCH_OFFSETS = listOf(1, 2, -1)
-        const val TODO_POLL_MS = 1500
-        const val REVERT_PREVIEW_LIMIT = 15
+        const val DOUBLE_CLICK_GUARD_MS = 300
+
+        const val REVISIONS_DEBOUNCE_MS = 300
+
+        const val FILE_CHANGE_DELAY_MS = 400
 
         const val COL_TREE = 0
         const val COL_STATS = 1

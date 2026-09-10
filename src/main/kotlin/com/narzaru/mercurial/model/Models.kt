@@ -2,51 +2,96 @@ package com.narzaru.mercurial.model
 
 import java.io.File
 
-/**
- * Comparison modes of the main tool window. The title says what is compared against, [hint]
- * says why the mode exists and how it differs from its neighbour: the titles alone did not
- * convey the difference between the two branch modes (a fixed base against the parent's head).
- */
-enum class HgDisplayMode(val title: String, val hint: String) {
+enum class ChangesetsFragments(val title: String, val hint: String) {
+
+    PLATFORM_TRIMMED(
+        "IDE, ignoring whitespace at line ends",
+        "Closest to a review server's own diff."
+    ),
+
+    PLATFORM(
+        "IDE",
+        "The IDE's own comparison engine, the one that draws the diff."
+    ),
+
+    PLATFORM_SETTINGS(
+        "IDE, as the diff viewer is set",
+        "The 'Do not ignore / Trim whitespaces / …' list above a comparison decides. " +
+            "The left side is rebuilt when that setting changes."
+    ),
+
+    HG(
+        "hg diff hunks",
+        "The engine that counts ± as well. Disagrees with the IDE about which of two identical " +
+            "braces counts as changed."
+    );
+
+    override fun toString(): String = title
+}
+
+enum class HgDisplayMode(
+    val title: String,
+    val hint: String
+) {
     UNCOMMITTED(
         "Uncommitted",
         "Uncommitted edits in the working directory."
     ),
+    MERGE(
+        "Merge",
+        "What this branch wrote, compared against the last revision of the parent branch merged " +
+            "into it. Everything the parent branch did up to that point stands on both sides and " +
+            "never enters the diff, so a branch kept up to date with repeated merges reviews as " +
+            "cleanly as one without them. A file a merge brought in but the branch never touched " +
+            "is not listed at all. The parent branch is named in the field on the right."
+    ),
     BRANCH(
         "Base",
-        "What the branch itself has done: compared against the revision it was branched off. The " +
-            "base does not move, so commits other people make in the parent branch do not affect the " +
-            "list — this is the review mode, the same diff Upsource shows. Only files touched by the " +
-            "branch's own revisions are listed."
+        "What the branch looks like now, compared against the revision it started from. The base " +
+            "does not move, so commits other people make in the parent branch do not affect the " +
+            "list, and the working copy is the right side — uncommitted edits are shown. Only " +
+            "files touched by the branch's own revisions are listed, merges aside; the strip " +
+            "under the list says which revisions are in and lets you change that. What a merge " +
+            "brought into those files counts here as the branch's own work — use " +
+            "'Changesets' for the review diff."
+    ),
+    CHANGESETS(
+        "Changesets",
+        "What the selected changesets did, rather than what the branch looks like now. Every file " +
+            "is compared on its own — from the state right before its first change to what the " +
+            "changesets made of it — so a merge from another branch stays out of the list and out " +
+            "of the diff. The right side is a revision, not the file on disk: uncommitted edits " +
+            "are not shown. How the left side is built is set in Settings → Tools → Mercurial Port."
     ),
     CUSTOM_BRANCH(
         "VS branch",
         "Compared against the branch named in the field on the right, as a whole: the file list is " +
             "not restricted to the branch's own files."
-    )
+    );
+
+    val isChangesets: Boolean get() = this == CHANGESETS
+
+    val usesRevisions: Boolean get() = this == BRANCH || isChangesets
+
+    val usesBranchField: Boolean get() = this == MERGE || this == CUSTOM_BRANCH
 }
 
-/** Режим списка: файлы или TODO. */
 enum class HgListMode { FILES, TODO }
 
-/**
- * Элемент списка изменённых файлов (или TODO-строки).
- *
- * [copiedFrom] — путь источника для переименования или копии (`hg status --copies`).
- * Базовую сторону диффа для таких файлов надо читать по нему: под своим именем в базовой
- * ревизии файла ещё нет, и без источника переименование выглядит как файл целиком новый.
- */
 data class HgFileItem(
-    var status: String,
+    val status: String,
     val path: String,
     val isUnchanged: Boolean = false,
     val todoText: String? = null,
     val lineNumber: Int = 0,
     val added: Int = 0,
     val removed: Int = 0,
-    val copiedFrom: String = ""
+    val copiedFrom: String = "",
+
+    val baseRev: String = "",
+    val headRev: String = ""
 ) {
-    /** Путь, под которым файл лежит в базовой ревизии. */
+
     val basePath: String get() = copiedFrom.ifEmpty { path }
 
     val isTodoItem: Boolean get() = lineNumber > 0
@@ -57,17 +102,8 @@ data class HgFileItem(
         get() = if (isTodoItem) "${File(path).name}:$lineNumber" else path
 }
 
-/** Количество добавленных/удалённых строк по файлам (разбор `hg diff --git`). */
 data class HgDiffStat(val added: Int, val removed: Int)
 
-/**
- * Одна ревизия в окне истории файла.
- *
- * [path] и [parentPath] хранятся отдельно, потому что `hg log -f` следует за
- * переименованиями: у одной и той же строки истории путь до и после ревизии
- * может отличаться, и `hg cat` для родителя нужно звать со старым именем.
- * [parentRev] — первый родитель (`{p1rev}`), «-1» для корневой ревизии.
- */
 data class HgHistoryItem(
     val revision: String,
     val node: String,
@@ -75,6 +111,5 @@ data class HgHistoryItem(
     val date: String,
     val message: String,
     val path: String = "",
-    val parentRev: String = "",
-    val parentPath: String = ""
+    val parentRev: String = ""
 )

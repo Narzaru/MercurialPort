@@ -14,7 +14,6 @@ class HgFileHistoryToolWindowFactory : ToolWindowFactory {
         service.panel = panel
 
         val content = ContentFactory.getInstance().createContent(panel, "", false)
-        // Отпишет панель от событий редактора, когда окно закроют.
         content.setDisposer(panel)
         toolWindow.contentManager.addContent(content)
     }

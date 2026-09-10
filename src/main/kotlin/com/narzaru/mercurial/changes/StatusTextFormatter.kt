@@ -1,29 +1,50 @@
 package com.narzaru.mercurial.changes
 
+import com.narzaru.mercurial.hg.HgFailure
+import com.narzaru.mercurial.hg.HgResult
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
 
-/** Texts of the status line under the Hg Changes toolbar. */
 object StatusTextFormatter {
 
-    /** The `hg log` template a revision description is built from. */
     const val REVISION_TEMPLATE = "{branch}|{node|short}|{desc|firstline}"
 
-    /** What `hg log` gives when a revision cannot be described: same shape, three fields. */
     const val UNKNOWN_REVISION = "Unknown|?|?"
 
-    /** `Branch: feature (a1b2c3) "Title" vs Branch point: default (…) "…"`. */
+    private val ROOT_BRANCH_MARKERS = listOf("revision 0", "unknown revision", "empty revision")
+
+    fun statusError(mode: HgDisplayMode, result: HgResult): String {
+        if (!isRootBranchFailure(mode, result)) return HgFailure.message(result)
+        return "ROOT BRANCH DETECTED (No Parent). Use '${HgDisplayMode.UNCOMMITTED.title}'.\nDetails: " +
+            result.stderr.trim()
+    }
+
+    private fun isRootBranchFailure(mode: HgDisplayMode, result: HgResult): Boolean =
+        !result.failedToStart && mode.usesRevisions &&
+            ROOT_BRANCH_MARKERS.any { result.stderr.contains(it) }
+
     fun branchInfo(mode: HgDisplayMode, currentInfo: String, baseInfo: String): String {
         if (mode == HgDisplayMode.UNCOMMITTED) return "Uncommitted in: ${revision(currentInfo)}"
         val relation = when (mode) {
             HgDisplayMode.CUSTOM_BRANCH -> " vs Branch: "
-            // Not just "Parent": the base is the branching point, not the parent's head.
+            HgDisplayMode.MERGE -> " vs Last merged in: "
             else -> " vs Branch point: "
         }
         return "Branch: ${revision(currentInfo)}$relation${revision(baseInfo)}"
     }
 
-    /** Summary on the right: file count, total +/- and how many are reviewed. */
+    fun mergeBaseProblem(parentBranch: String, currentInfo: String, baseInfo: String): String? = when {
+        baseInfo.isBlank() || baseInfo == UNKNOWN_REVISION ->
+            "No revision of '$parentBranch' is an ancestor of this branch — nothing has been " +
+                "merged in. Use '${HgDisplayMode.BRANCH.title}', or name the right parent branch."
+        node(currentInfo) == node(baseInfo) ->
+            "This branch is '$parentBranch' itself, or carries nothing of its own on top of it. " +
+                "Use '${HgDisplayMode.UNCOMMITTED.title}'."
+        else -> null
+    }
+
+    private fun node(raw: String): String = raw.split('|', limit = 3).getOrElse(1) { raw }
+
     fun summary(files: List<HgFileItem>, reviewed: Int, statsPending: Boolean): String = when {
         files.isEmpty() -> " "
         statsPending -> "${files.size} files  ·  counting ±…  ·  $reviewed/${files.size} reviewed"

@@ -7,7 +7,7 @@ import org.junit.Test
 class HgStatusParserTest {
 
     @Test
-    fun `разбирает статус и путь`() {
+    fun `parses the status letter and the path`() {
         val items = HgStatusParser.parse("M src/main.kt\nA src/new.kt\n")
 
         assertEquals(listOf("M", "A"), items.map { it.status })
@@ -15,34 +15,49 @@ class HgStatusParserTest {
     }
 
     @Test
-    fun `понимает CRLF и пропускает пустые строки`() {
+    fun `CRLF is understood and blank lines are skipped`() {
         val items = HgStatusParser.parse("M a.kt\r\n\r\nR b.kt\r\n")
 
         assertEquals(listOf("a.kt", "b.kt"), items.map { it.path })
     }
 
     @Test
-    fun `сохраняет пробелы внутри пути`() {
+    fun `a one letter file name is a valid status line`() {
+        val items = HgStatusParser.parse("M a\n")
+
+        assertEquals("M", items.single().status)
+        assertEquals("a", items.single().path)
+    }
+
+    @Test
+    fun `a line that is not shaped like a status is ignored`() {
+        val items = HgStatusParser.parse("abort\nM a.kt\n??\n")
+
+        assertEquals(listOf("a.kt"), items.map { it.path })
+    }
+
+    @Test
+    fun `spaces inside the path are kept`() {
         val items = HgStatusParser.parse("M dir with space/file name.kt")
 
         assertEquals("dir with space/file name.kt", items.single().path)
     }
 
     @Test
-    fun `удалённые мимо hg приходят со статусом восклицания`() {
+    fun `files deleted outside hg get the missing status`() {
         val items = HgStatusParser.parse("! gone.kt")
 
         assertEquals("!", items.single().status)
     }
 
     @Test
-    fun `на пустом выводе список пуст`() {
+    fun `empty output gives an empty list`() {
         assertTrue(HgStatusParser.parse("").isEmpty())
         assertTrue(HgStatusParser.parse("\n\n").isEmpty())
     }
 
     @Test
-    fun `строка с отступом это источник копии предыдущего файла`() {
+    fun `an indented line is the copy source of the previous file`() {
         val items = HgStatusParser.parse("A src/new.kt\n  src/old.kt\nM other.kt\n")
 
         assertEquals(listOf("src/new.kt", "other.kt"), items.map { it.path })
@@ -51,7 +66,7 @@ class HgStatusParserTest {
     }
 
     @Test
-    fun `переименование сводится в одну строку`() {
+    fun `a rename is folded into a single row`() {
         val items = HgStatusParser.foldRenames(
             HgStatusParser.parse("A src/new.kt\n  src/old.kt\nR src/old.kt\n")
         )
@@ -63,7 +78,20 @@ class HgStatusParserTest {
     }
 
     @Test
-    fun `копия остаётся добавлением, источник на месте`() {
+    fun `two files copied from the same removed source both survive`() {
+        val items = HgStatusParser.foldRenames(
+            HgStatusParser.parse("A src/new1.kt\n  src/old.kt\nA src/new2.kt\n  src/old.kt\nR src/old.kt\n")
+        )
+
+        assertEquals(listOf("src/new1.kt", "src/new2.kt"), items.map { it.path })
+        assertEquals(
+            listOf(HgStatusParser.RENAMED_STATUS, HgStatusParser.RENAMED_STATUS),
+            items.map { it.status }
+        )
+    }
+
+    @Test
+    fun `a copy stays an addition and its source stays in place`() {
         val items = HgStatusParser.foldRenames(
             HgStatusParser.parse("A src/copy.kt\n  src/orig.kt\nM src/orig.kt\n")
         )
@@ -73,14 +101,14 @@ class HgStatusParserTest {
     }
 
     @Test
-    fun `удаление без пары остаётся в списке`() {
+    fun `a removal without a matching addition stays in the list`() {
         val items = HgStatusParser.foldRenames(HgStatusParser.parse("R src/gone.kt\nA src/new.kt\n"))
 
         assertEquals(listOf("R", "A"), items.map { it.status })
     }
 
     @Test
-    fun `флаг неотслеживаемых добавляется только по требованию`() {
+    fun `the untracked flag is added only on demand`() {
         assertEquals("-mard", HgStatusParser.statusFlags(includeUntracked = false))
         assertEquals("-mardu", HgStatusParser.statusFlags(includeUntracked = true))
     }

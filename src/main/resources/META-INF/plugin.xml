@@ -32,6 +32,7 @@
                     anchor="bottom"
                     factoryClass="com.narzaru.mercurial.changes.HgChangesToolWindowFactory"/>
         <editorTabTitleProvider implementation="com.narzaru.mercurial.status.HgEditorTabTitleProvider"/>
+        <actionPromoter implementation="com.narzaru.mercurial.diff.ToggleDiffPromoter"/>
         <applicationConfigurable parentId="tools"
                                  id="mercurial.settings"
                                  displayName="Mercurial Port"
@@ -42,17 +43,31 @@
                     factoryClass="com.narzaru.mercurial.history.HgFileHistoryToolWindowFactory"/>
     </extensions>
 
+    <projectListeners>
+        <listener class="com.narzaru.mercurial.changes.HgDiffRedirect"
+                  topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
+    </projectListeners>
+
+    <applicationListeners>
+        <listener class="com.narzaru.mercurial.hg.HgCommandServerCleanup"
+                  topic="com.intellij.openapi.project.ProjectCloseListener"/>
+    </applicationListeners>
+
     <actions>
+        <action id="mercurial.ToggleDiffAndFile"
+                class="com.narzaru.mercurial.diff.ToggleDiffAndFileAction"
+                text="Toggle Hg Diff and File"
+                description="Switch between a changed file and its Hg diff, carrying the caret line over">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="Diff.EditorPopupMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="F4"/>
+        </action>
         <group id="mercurial.ExportGroup" text="Hg Export" popup="true">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <action id="mercurial.ExportOpenFiles"
                     class="com.narzaru.mercurial.export.ExportOpenFilesAction"
                     text="Export Open Files to Folder"
                     description="Copy currently open editor files into a folder"/>
-            <action id="mercurial.ExportToTotalCommander"
-                    class="com.narzaru.mercurial.export.ExportToTotalCommanderAction"
-                    text="Export Open Files to Total Commander"
-                    description="Copy open editor files and open the folder in Total Commander"/>
         </group>
     </actions>
 </idea-plugin>

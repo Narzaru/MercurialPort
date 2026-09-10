@@ -12,7 +12,7 @@ class TodoParserTest {
     private fun parse(text: String) = TodoParser.parse(source, text)
 
     @Test
-    fun `находит TODO в строчном комментарии`() {
+    fun `finds a TODO in a line comment`() {
         val items = parse("val x = 1\n// TODO: убрать хак\nval y = 2")
 
         assertEquals(1, items.size)
@@ -21,14 +21,14 @@ class TodoParserTest {
     }
 
     @Test
-    fun `находит TODO в блочном комментарии`() {
+    fun `finds a TODO in a block comment`() {
         val items = parse("/* TODO подумать */")
 
         assertEquals("подумать", items.single().todoText)
     }
 
     @Test
-    fun `находит TODO внутри многострочного блока`() {
+    fun `finds a TODO inside a multiline block`() {
         val items = parse("/*\n * TODO дописать\n */\ncode()")
 
         assertEquals(1, items.size)
@@ -37,24 +37,24 @@ class TodoParserTest {
     }
 
     @Test
-    fun `регистр слова не важен`() {
+    fun `the case of the word does not matter`() {
         assertEquals(1, parse("// todo раз").size)
         assertEquals(1, parse("// ToDo два").size)
         assertEquals(1, parse("// TODO три").size)
     }
 
     @Test
-    fun `TODO вне комментария не считается`() {
+    fun `a TODO outside a comment does not count`() {
         assertTrue(parse("val todo = \"нет\"").isEmpty())
     }
 
     @Test
-    fun `после закрытия блока код снова не комментарий`() {
+    fun `after a block is closed the code is not a comment again`() {
         assertTrue(parse("/* коммент */ val todo = 1").isEmpty())
     }
 
     @Test
-    fun `несколько TODO дают несколько элементов с номерами строк`() {
+    fun `several TODOs give several items with line numbers`() {
         val items = parse("// TODO раз\ncode()\n// TODO два")
 
         assertEquals(listOf(1, 3), items.map { it.lineNumber })
@@ -62,7 +62,7 @@ class TodoParserTest {
     }
 
     @Test
-    fun `элемент наследует статус и путь исходного файла`() {
+    fun `an item inherits the status and the path of its file`() {
         val item = parse("// TODO раз").single()
 
         assertEquals(source.path, item.path)
@@ -71,37 +71,36 @@ class TodoParserTest {
     }
 
     @Test
-    fun `разделители после слова отбрасываются`() {
+    fun `separators after the word are dropped`() {
         assertEquals("текст", parse("// TODO: текст").single().todoText)
         assertEquals("текст", parse("// TODO - текст").single().todoText)
         assertEquals("текст", parse("//TODO текст").single().todoText)
     }
 
     @Test
-    fun `TODO после кода в конце строки находится`() {
+    fun `a TODO after code at the end of a line is found`() {
         val items = parse("val x = 1 // TODO проверить")
 
         assertEquals("проверить", items.single().todoText)
     }
 
     @Test
-    fun `голое TODO без текста остаётся строкой комментария`() {
+    fun `a bare TODO without text keeps the comment line`() {
         assertEquals("// TODO", parse("// TODO").single().todoText)
     }
 
     @Test
-    fun `бинарный файл не разбирается`() {
-        // Нулевой байт — признак бинарника; «строк» в нём были бы десятки тысяч.
-        assertTrue(parse("\u0000// TODO раз").isEmpty())
+    fun `a binary file is not parsed`() {
+        assertTrue(parse("\u0000// TODO раз").isEmpty())
     }
 
     @Test
-    fun `файл без слова не разбирается`() {
+    fun `a file without the word is not parsed`() {
         assertTrue(parse("// обычный комментарий\ncode()").isEmpty())
     }
 
     @Test
-    fun `CRLF не сдвигает номера строк`() {
+    fun `CRLF does not shift the line numbers`() {
         val items = parse("code()\r\n// TODO раз\r\ncode()")
 
         assertEquals(2, items.single().lineNumber)
