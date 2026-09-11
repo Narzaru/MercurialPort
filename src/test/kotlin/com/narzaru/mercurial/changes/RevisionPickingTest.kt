@@ -218,4 +218,41 @@ class RevisionPickingTest {
         assertEquals(RevisionsState("other", stored), reloaded)
         assertEquals(listOf("97fbf27", "702a733"), reloaded.selection.selectedNodes(revisions))
     }
+
+    @Test
+    fun `marks of listed revisions survive the cleanup`() {
+        val stored = listOf("97fbf27=0", "8fcae09=1")
+        assertEquals(null, RevisionsSync.prunedOverrides("feature", revisions, stored))
+    }
+
+    @Test
+    fun `marks of revisions that are gone are dropped`() {
+        val stored = listOf("97fbf27=0", "deadbee=0", "cafe123=1")
+        assertEquals(listOf("97fbf27=0"), RevisionsSync.prunedOverrides("feature", revisions, stored))
+    }
+
+    @Test
+    fun `an empty revision list cleans nothing`() {
+        val stored = listOf("deadbee=0")
+        assertEquals(null, RevisionsSync.prunedOverrides("feature", emptyList(), stored))
+    }
+
+    @Test
+    fun `an unknown branch cleans nothing`() {
+        val stored = listOf("deadbee=0")
+        assertEquals(null, RevisionsSync.prunedOverrides("", revisions, stored))
+    }
+
+    @Test
+    fun `a selection back at its default is stored as nothing`() {
+        val stored = listOf("deadbee=0", "97fbf27=1", "8fcae09=0")
+        val pruned = RevisionsSync.prunedOverrides("feature", revisions, stored)
+        assertEquals(emptyList<String>(), pruned)
+        assertTrue(RevisionSelection.fromStorage(pruned!!).isDefaultFor(revisions))
+    }
+
+    @Test
+    fun `nothing stored means nothing to clean`() {
+        assertEquals(null, RevisionsSync.prunedOverrides("feature", revisions, emptyList()))
+    }
 }

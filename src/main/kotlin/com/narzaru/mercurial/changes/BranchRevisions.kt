@@ -155,6 +155,15 @@ class RevisionSelection private constructor(private val overrides: Map<String, B
         return RevisionSelection(next)
     }
 
+    fun retaining(revisions: List<HgRevision>): RevisionSelection {
+        val kept = HashMap<String, Boolean>()
+        for (revision in revisions) {
+            val value = overrides[revision.node] ?: continue
+            if (value != !revision.isMerge) kept[revision.node] = value
+        }
+        return RevisionSelection(kept)
+    }
+
     fun isDefaultFor(revisions: List<HgRevision>): Boolean =
         revisions.none { overrides.containsKey(it.node) }
 

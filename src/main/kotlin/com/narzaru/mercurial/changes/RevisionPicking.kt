@@ -12,6 +12,12 @@ object RevisionsSync {
     fun afterLoad(state: RevisionsState, branch: String, selection: RevisionSelection): RevisionsState =
         if (!isBranchKnown(branch) || branch == state.branch) state
         else RevisionsState(branch, selection)
+
+    fun prunedOverrides(branch: String, revisions: List<HgRevision>, stored: List<String>): List<String>? {
+        if (!isBranchKnown(branch) || revisions.isEmpty() || stored.isEmpty()) return null
+        val kept = RevisionSelection.fromStorage(stored).retaining(revisions).toStorage()
+        return if (kept == stored.sorted()) null else kept
+    }
 }
 
 data class RevisionToggle(val nodes: List<String>, val restoresSelection: Boolean) {

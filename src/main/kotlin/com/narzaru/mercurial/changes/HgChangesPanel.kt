@@ -769,6 +769,11 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         scheduleRevisionsRefresh()
     }
 
+    private fun dropOverridesOfGoneRevisions(branch: String, revisions: List<HgRevision>) {
+        val pruned = RevisionsSync.prunedOverrides(branch, revisions, settings.revisionOverrides(branch)) ?: return
+        settings.setRevisionOverrides(branch, pruned)
+    }
+
     private fun storeRevisionOverrides(values: List<String>) {
         val branch = revisionsState.branch
         if (RevisionsSync.isBranchKnown(branch)) settings.setRevisionOverrides(branch, values)
@@ -874,6 +879,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                         revisionsState = RevisionsSync.afterLoad(revisionsState, result.branch, result.selection)
                         branchRevisions = result.revisions
                         revisionsBar.update(branchRevisions, revisionsState.selection)
+                        dropOverridesOfGoneRevisions(result.branch, result.revisions)
                     }
                     updateRevisionsBarVisibility()
                     sourceFiles.clear()
