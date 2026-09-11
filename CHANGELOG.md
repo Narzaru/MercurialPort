@@ -3,6 +3,8 @@
 # Mercurial Port Changelog
 
 ## [Unreleased]
+
+## [1.0.8] - 2026-09-11
 ### Added
 - **`Merge` mode**: compares the branch against the last revision of the parent branch merged
   into it, rather than against the point the branch started from. Everything the parent branch did
