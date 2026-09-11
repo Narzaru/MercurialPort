@@ -14,7 +14,7 @@ import javax.swing.BoxLayout
 import javax.swing.JPanel
 
 class RevisionsBar(
-    private val onToggle: (HgRevision, Boolean) -> Unit,
+    private val onToggle: (HgRevision, Boolean, Int) -> Unit,
     private val onReset: () -> Unit
 ) : JPanel(BorderLayout()) {
 
@@ -57,18 +57,26 @@ class RevisionsBar(
                     "</html>"
                 box.isOpaque = false
                 box.alignmentX = LEFT_ALIGNMENT
-                box.addActionListener { onToggle(revision, box.isSelected) }
+                box.addActionListener { event -> onToggle(revision, box.isSelected, event.modifiers) }
                 boxes[revision.node] = box
                 list.add(box)
             }
         } else {
-            for (revision in revisions) boxes[revision.node]?.isSelected = selection.isSelected(revision)
+            applySelection(revisions, selection)
         }
         updateHeader(revisions, selection)
         val rows = revisions.size.coerceIn(1, VISIBLE_ROWS)
         scroll.preferredSize = Dimension(0, rows * JBUI.scale(ROW_HEIGHT) + JBUI.scale(4))
         revalidate()
         repaint()
+    }
+
+    fun applySelection(revisions: List<HgRevision>, selection: RevisionSelection) {
+        val byNode = revisions.associateBy { it.node }
+        for ((node, box) in boxes) {
+            val revision = byNode[node]
+            box.isSelected = revision != null && selection.isSelected(revision)
+        }
     }
 
     fun updateHeader(revisions: List<HgRevision>, selection: RevisionSelection) {

@@ -47,7 +47,7 @@ class ChangesLoader(
         val head = headQueries(usesRevisions, earlyTargetRev, trace)
         val branch = head.branch
         val revisions = head.revisions
-        val selection = if (usesRevisions) {
+        val selection = if (usesRevisions && RevisionsSync.isBranchKnown(branch)) {
             RevisionSelection.fromStorage(revisionOverrides(branch))
         } else {
             RevisionSelection.DEFAULT
@@ -296,8 +296,10 @@ class ChangesLoader(
         commands.run("log", "-r", rev, "--template", StatusTextFormatter.REVISION_TEMPLATE)
             .stdout.ifBlank { StatusTextFormatter.UNKNOWN_REVISION }
 
-    private fun currentBranch(): String =
-        commands.run("log", "-r", ".", "--template", "{branch}").stdout.trim()
+    private fun currentBranch(): String {
+        val r = commands.run("log", "-r", ".", "--template", "{branch}")
+        return if (r.success) r.stdout.trim() else ""
+    }
 
     private fun branchRevisions(): List<HgRevision> {
         val r = commands.run(

@@ -129,8 +129,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private val partialDiff = ConcurrentHashMap<String, Int>()
 
     private var branchRevisions: List<HgRevision> = emptyList()
-    private var revisionSelection = RevisionSelection.DEFAULT
-    private var currentBranchName = ""
+    private var revisionsState = RevisionsState()
     private var revisionsVisible = true
 
     private var filtersVisible = false
@@ -721,27 +720,42 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     }
 
     private fun updateRevisionsBarVisibility() {
-        revisionsBar.isVisible =
-            revisionsVisible && displayMode.usesRevisions && branchRevisions.isNotEmpty()
+        revisionsBar.isVisible = revisionsVisible && displayMode.usesRevisions &&
+            branchRevisions.isNotEmpty() && RevisionsSync.isBranchKnown(revisionsState.branch)
         revalidate()
         repaint()
     }
 
-    private fun toggleRevision(revision: HgRevision, selected: Boolean) {
-        revisionSelection = revisionSelection.with(revision, selected)
-        settings.setRevisionOverrides(currentBranchName, revisionSelection.toStorage())
-        revisionsBar.updateHeader(branchRevisions, revisionSelection)
+    private fun toggleRevision(revision: HgRevision, selected: Boolean, modifiers: Int) {
+        val pick = RevisionPicking.apply(
+            branchRevisions,
+            revisionsState.selection,
+            revisionsState.anchor,
+            revision,
+            RevisionGesture.kindOf(modifiers),
+            selected
+        )
+        revisionsState = revisionsState.copy(selection = pick.selection, anchor = pick.anchor)
+        storeRevisionOverrides(pick.selection.toStorage())
+        revisionsBar.applySelection(branchRevisions, revisionsState.selection)
+        revisionsBar.updateHeader(branchRevisions, revisionsState.selection)
         scheduleRevisionsRefresh()
     }
 
     private fun resetRevisions() {
-        revisionSelection = RevisionSelection.DEFAULT
-        settings.setRevisionOverrides(currentBranchName, emptyList())
-        revisionsBar.update(branchRevisions, revisionSelection)
+        revisionsState = revisionsState.copy(selection = RevisionSelection.DEFAULT, anchor = "")
+        storeRevisionOverrides(emptyList())
+        revisionsBar.update(branchRevisions, revisionsState.selection)
         scheduleRevisionsRefresh()
     }
 
+    private fun storeRevisionOverrides(values: List<String>) {
+        val branch = revisionsState.branch
+        if (RevisionsSync.isBranchKnown(branch)) settings.setRevisionOverrides(branch, values)
+    }
+
     private fun scheduleRevisionsRefresh() {
+        refreshId++
         revisionsAlarm.cancelAllRequests()
         revisionsAlarm.addRequest({ refresh() }, REVISIONS_DEBOUNCE_MS)
     }
@@ -835,10 +849,9 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                     partialDiff.clear()
                     lastActivatedPath = ""
                     if (mode.usesRevisions) {
-                        currentBranchName = result.branch
+                        revisionsState = RevisionsSync.afterLoad(revisionsState, result.branch, result.selection)
                         branchRevisions = result.revisions
-                        revisionSelection = result.selection
-                        revisionsBar.update(branchRevisions, revisionSelection)
+                        revisionsBar.update(branchRevisions, revisionsState.selection)
                     }
                     updateRevisionsBarVisibility()
                     sourceFiles.clear()

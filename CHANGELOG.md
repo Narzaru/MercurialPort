@@ -3,6 +3,11 @@
 # Mercurial Port Changelog
 
 ## [Unreleased]
+### Changed
+- **The revision strip keeps every click.** A revision unchecked while the list was still
+  reloading no longer comes back, and the choice stays as made.
+- **A range of revisions is picked with Shift.** A Shift-click sets every revision between the
+  last one clicked and this one to the same state; a plain click still switches a single one.
 
 ## [1.0.8] - 2026-09-11
 ### Added

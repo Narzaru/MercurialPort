@@ -137,6 +137,29 @@ class ChangesLoaderTest {
     }
 
     @Test
+    fun `a failed branch query leaves the branch unknown and the overrides unread`() {
+        val asked = ArrayList<String>()
+        val hg = FakeHg(
+            mapOf(
+                currentBranch to failed("abort: no repository found"),
+                branchRevisions to ok(revisionsLog),
+                currentRevision to ok("feature|abc123|Work in progress"),
+                baseRevision(branchPoint) to ok("default|def456|Parent work"),
+                listOf("log", "-r", "n1+n2", "--template", "{join(files, '\\n')}\\n") to ok("src/A.kt"),
+                status(branchPoint) to ok("M src/A.kt")
+            )
+        )
+        val result = load(hg, HgDisplayMode.BRANCH, overrides = { branch ->
+            asked.add(branch)
+            listOf("n1=0")
+        })
+
+        assertEquals(emptyList<String>(), asked)
+        assertEquals("", result.branch)
+        assertEquals(listOf("n1", "n2"), result.selection.selectedNodes(result.revisions))
+    }
+
+    @Test
     fun `a branch without revisions of its own is reported instead of loaded`() {
         val hg = FakeHg(
             mapOf(
