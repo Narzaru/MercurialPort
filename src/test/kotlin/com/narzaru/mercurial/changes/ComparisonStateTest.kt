@@ -56,4 +56,22 @@ class ComparisonStateTest {
         assertNull(state.changedItemAt("a.kt"))
         assertEquals("b.kt", state.changedItemAt("b.kt")?.path)
     }
+
+    @Test
+    fun `merged items keep the ones left untouched`() {
+        val state = ComparisonState()
+            .withItems(listOf(item("a.kt"), item("b.kt")))
+            .withItemsMerged(listOf(item("b.kt", unchanged = true)))
+
+        assertEquals("a.kt", state.changedItemAt("a.kt")?.path)
+        assertNull(state.changedItemAt("b.kt"))
+    }
+
+    @Test
+    fun `merging nothing leaves the index as it was`() {
+        val state = ComparisonState().withItems(listOf(item("a.kt")))
+
+        assertEquals(state, state.withItemsMerged(emptyList()))
+        assertEquals(state, state.withItemsMerged(listOf(item("todo.kt", line = 12))))
+    }
 }

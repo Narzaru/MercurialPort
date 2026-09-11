@@ -20,4 +20,12 @@ data class ComparisonState(
 
     fun withItems(items: List<HgFileItem>): ComparisonState =
         copy(itemsByPath = items.filter { !it.isTodoItem }.associateBy { HgPaths.key(it.path) })
+
+    fun withItemsMerged(items: List<HgFileItem>): ComparisonState {
+        val merged = items.filter { !it.isTodoItem }
+        if (merged.isEmpty()) return this
+        val next = HashMap(itemsByPath)
+        merged.associateByTo(next) { HgPaths.key(it.path) }
+        return copy(itemsByPath = next)
+    }
 }

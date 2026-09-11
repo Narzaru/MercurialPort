@@ -10,6 +10,13 @@
   Shift-click, Ctrl-click, arrows — and a click on a revision's text selects its row instead of
   switching the checkbox. The checkbox is switched by a click on the checkbox itself or by Space,
   and the new state goes to every selected row at once.
+- **`+N −M` is recounted as a file is written**, without waiting for `Refresh`. Only the files
+  that changed are counted, a save of many files at once costs a single `hg` run, and a file
+  edited back to what the base holds turns into `♦` on its own.
+- **A change made outside the list reaches the window.** An `hg update`, `revert` or commit run
+  from a terminal, or an edit of a file the list does not hold yet, now reloads the list instead
+  of leaving it as it was until `Refresh`. What is worth a reload is decided by Mercurial, not
+  guessed from the path, so a build writing over its output leaves the window alone.
 
 ## [1.0.8] - 2026-09-11
 ### Added

@@ -24,11 +24,106 @@ class FileChangeScopeTest {
     }
 
     @Test
-    fun `a file outside the list is left alone`() {
+    fun `a file outside the list is reported for a check`() {
         val reaction = FileChangeScope.of(root, listOf("C:/repo/src/other.kt"), files, setOf("src/a.kt"))
 
-        assertTrue(reaction.isEmpty)
+        assertEquals(listOf("src/other.kt"), reaction.unlistedKeys)
+        assertTrue(reaction.changedKeys.isEmpty())
+        assertTrue(reaction.diffKeys.isEmpty())
         assertFalse(reaction.rescanTodos)
+    }
+
+    @Test
+    fun `a listed file needs no check`() {
+        val reaction = FileChangeScope.of(root, listOf("C:/repo/src/a.kt"), files, emptySet())
+
+        assertEquals(listOf("src/a.kt"), reaction.changedKeys)
+        assertTrue(reaction.unlistedKeys.isEmpty())
+        assertFalse(reaction.repoStateTouched)
+    }
+
+    @Test
+    fun `a write into the working directory state asks for a check`() {
+        for (name in listOf("dirstate", "dirstate.a1b2c3", "branch", "bookmarks", "bookmarks.current")) {
+            val reaction = FileChangeScope.of(root, listOf("C:/repo/.hg/$name"), files, emptySet())
+
+            assertTrue(name, reaction.repoStateTouched)
+            assertTrue(name, reaction.changedKeys.isEmpty())
+            assertTrue(name, reaction.unlistedKeys.isEmpty())
+        }
+    }
+
+    @Test
+    fun `edited ignore rules are told apart`() {
+        for (path in listOf("C:/repo/.hgignore", "C:/repo/sub/.hgignore")) {
+            val reaction = FileChangeScope.of(root, listOf(path), files, emptySet())
+
+            assertTrue(path, reaction.ignoreRulesChanged)
+        }
+        assertFalse(FileChangeScope.of(root, listOf("C:/repo/src/a.kt"), files, emptySet()).ignoreRulesChanged)
+    }
+
+    @Test
+    fun `a tracked ignore file is both a change and a rules edit`() {
+        val listed = files + file(".hgignore")
+        val reaction = FileChangeScope.of(root, listOf("C:/repo/.hgignore"), listed, emptySet())
+
+        assertEquals(listOf(".hgignore"), reaction.changedKeys)
+        assertTrue(reaction.ignoreRulesChanged)
+    }
+
+    @Test
+    fun `a noisy directory is noise on its own`() {
+        for (path in listOf("C:/repo/build", "C:/repo/module/out", "C:/repo/node_modules")) {
+            val reaction = FileChangeScope.of(root, listOf(path), files, emptySet())
+
+            assertTrue(path, reaction.isEmpty)
+        }
+    }
+
+    @Test
+    fun `the housekeeping mercurial does on its own is ignored`() {
+        val paths = listOf(
+            "C:/repo/.hg/cache/branch2",
+            "C:/repo/.hg/wcache/checklink",
+            "C:/repo/.hg/store/lock",
+            "C:/repo/.hg/wlock",
+            "C:/repo/.hg/journal.dirstate",
+            "C:/repo/.hg/undo.dirstate",
+            "C:/repo/.hg"
+        )
+        for (path in paths) {
+            val reaction = FileChangeScope.of(root, listOf(path), files, emptySet())
+
+            assertTrue(path, reaction.isEmpty)
+        }
+    }
+
+    @Test
+    fun `build output and editor leftovers are ignored`() {
+        val paths = listOf(
+            "C:/repo/build/classes/A.class",
+            "C:/repo/module/build/libs/a.jar",
+            "C:/repo/.gradle/7.0/fileHashes.bin",
+            "C:/repo/.idea/workspace.xml",
+            "C:/repo/node_modules/left-pad/index.js",
+            "C:/repo/src/a.kt___jb_tmp___"
+        )
+        for (path in paths) {
+            val reaction = FileChangeScope.of(root, listOf(path), files, emptySet())
+
+            assertTrue(path, reaction.isEmpty)
+        }
+    }
+
+    @Test
+    fun `an unlisted file is told apart from a listed one in the same batch`() {
+        val reaction = FileChangeScope.of(
+            root, listOf("C:/repo/src/a.kt", "C:/repo/src/fresh.kt"), files, setOf("src/a.kt")
+        )
+
+        assertEquals(listOf("src/a.kt"), reaction.changedKeys)
+        assertEquals(listOf("src/fresh.kt"), reaction.unlistedKeys)
     }
 
     @Test
@@ -66,6 +161,7 @@ class FileChangeScopeTest {
 
         assertEquals(listOf("src/a.kt", "docs/c.md"), reaction.changedKeys)
         assertEquals(listOf("src/a.kt", "docs/c.md"), reaction.diffKeys)
+        assertEquals(listOf("src/gone.kt"), reaction.unlistedKeys)
     }
 
     @Test
@@ -86,13 +182,14 @@ class FileChangeScopeTest {
     }
 
     @Test
-    fun `a rename reacts on the old path and ignores the new one`() {
+    fun `a rename reacts on the old path and checks the new one`() {
         val reaction = FileChangeScope.of(
             root, listOf("C:/repo/src/a.kt", "C:/repo/src/renamed.kt"), files, setOf("src/a.kt")
         )
 
         assertEquals(listOf("src/a.kt"), reaction.changedKeys)
         assertEquals(listOf("src/a.kt"), reaction.diffKeys)
+        assertEquals(listOf("src/renamed.kt"), reaction.unlistedKeys)
     }
 
     @Test
@@ -103,10 +200,16 @@ class FileChangeScopeTest {
     }
 
     @Test
-    fun `an empty list of files needs no reaction`() {
+    fun `an edit made while the list is empty is still checked`() {
         val reaction = FileChangeScope.of(root, listOf("C:/repo/src/a.kt"), emptyList(), setOf("src/a.kt"))
 
-        assertTrue(reaction.isEmpty)
+        assertEquals(listOf("src/a.kt"), reaction.unlistedKeys)
+        assertTrue(reaction.changedKeys.isEmpty())
+    }
+
+    @Test
+    fun `nothing changed means no reaction`() {
+        assertTrue(FileChangeScope.of(root, emptyList(), files, emptySet()).isEmpty)
     }
 
     @Test

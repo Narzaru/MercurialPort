@@ -35,6 +35,20 @@ class HgFileStatusService(private val project: Project) {
         refreshOpenTabs()
     }
 
+    fun merge(repoRoot: File, items: List<HgFileItem>) {
+        if (items.isEmpty()) return
+        val next = HashMap(statuses)
+        var changed = false
+        for (item in items) {
+            if (item.isTodoItem) continue
+            val key = HgPaths.key(File(repoRoot, item.path).path)
+            if (next.put(key, item.status) != item.status) changed = true
+        }
+        if (!changed) return
+        statuses = next
+        refreshOpenTabs()
+    }
+
     fun refreshOpenTabs() {
         ApplicationManager.getApplication().invokeLater({
             if (project.isDisposed) return@invokeLater

@@ -8,6 +8,7 @@ import com.narzaru.mercurial.hg.HgDiffStatParser
 import com.narzaru.mercurial.hg.HgFailure
 import com.narzaru.mercurial.model.ChangesetsFragments
 import com.narzaru.mercurial.hg.HgPaths
+import com.narzaru.mercurial.hg.HgResult
 import com.narzaru.mercurial.hg.HgSettings
 import com.narzaru.mercurial.hg.HgSettingsConfigurable
 import com.narzaru.mercurial.history.HgFileHistoryService
@@ -152,6 +153,22 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     @Volatile
     private var todoRescanPending = false
 
+    private var refreshPending = false
+
+    private var repoStateProbePending = false
+
+    private var repoStateRunning = false
+
+    private var probeRunning = false
+
+    private var probeId = 0
+
+    private var knownRepoState = RepoState.UNKNOWN
+
+    private var quietKeys: Set<String> = emptySet()
+
+    private val pendingUnlistedKeys = LinkedHashSet<String>()
+
     private val revisionsAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, project)
 
     private val selectionAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, project)
@@ -174,6 +191,11 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
     private var statsRequestId = 0
     private var statsPending = false
+
+    private var statsRanges: List<DiffRange> = emptyList()
+    private var statsPaths: Map<DiffRange, List<String>> = emptyMap()
+    private var partialStatsRunning = false
+    private val pendingStatsKeys = LinkedHashSet<String>()
 
     private val filterField = JBTextField()
     private val excludeField = JBTextField()
@@ -797,6 +819,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         fileChangeAlarm.cancelAllRequests()
         renderFiltered()
         if (mode == HgListMode.TODO && !busy) scanTodos()
+        if (fileChangeWorkPending) scheduleFileChangeReaction()
     }
 
     private fun projectStartDir(): File? {
@@ -843,6 +866,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                 onEdt {
                     if (requestId != refreshId) return@onEdt
                     comparison = ComparisonState(repoRoot, result.targetRev, mode, result.revsByFile)
+                    knownRepoState = RepoState.parse(result.currentInfo)
                     baseContentCache.clear()
                     partialDiff.clear()
                     lastActivatedPath = ""
@@ -884,8 +908,19 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun dropPendingScans() {
         statsRequestId++
         statsPending = false
+        partialStatsRunning = false
+        pendingStatsKeys.clear()
+        statsRanges = emptyList()
+        statsPaths = emptyMap()
         todoScanId++
         todoRescanPending = false
+        probeId++
+        probeRunning = false
+        repoStateRunning = false
+        repoStateProbePending = false
+        refreshPending = false
+        pendingUnlistedKeys.clear()
+        quietKeys = emptySet()
         pendingChangedPaths.clear()
         fileChangeAlarm.cancelAllRequests()
     }
@@ -899,6 +934,8 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     ) {
         val requestId = ++statsRequestId
         statsPending = true
+        statsRanges = ranges
+        statsPaths = paths
         updateSummary(shownFiles())
         val statJobs = ranges.ifEmpty { listOf(DiffRange(targetRev, "")) }
         val ignoreEolChanges = HgSettings.ignoreEolChanges
@@ -942,15 +979,91 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                         statsPending = false
                         updateSummary(shownFiles())
                     }
+                    if (requestId == statsRequestId) flushPendingStatsKeys()
                 }
             }
         }
     }
 
+    private fun recountStats(keys: Collection<String>) {
+        if (keys.isEmpty() && pendingStatsKeys.isEmpty()) return
+        val repoRoot = comparison.repoRoot
+        if (repoRoot == null || busy || statsPending || partialStatsRunning) {
+            pendingStatsKeys.addAll(keys)
+            return
+        }
+        val batch = LinkedHashSet(pendingStatsKeys)
+        batch.addAll(keys)
+        pendingStatsKeys.clear()
+        val targetRev = comparison.baseRev
+        when (val action = PartialStatsPlan.of(comparison.mode, targetRev, sourceFiles, batch)) {
+            PartialStatsAction.Skip -> return
+            PartialStatsAction.CountAll -> loadDiffStats(repoRoot, targetRev, statsRanges, statsPaths)
+            is PartialStatsAction.Count -> countChangedFiles(repoRoot, targetRev, action)
+        }
+    }
+
+    private fun countChangedFiles(repoRoot: File, targetRev: String, action: PartialStatsAction.Count) {
+        val refreshStamp = refreshId
+        val statsStamp = statsRequestId
+        val ignoreEolChanges = HgSettings.ignoreEolChanges
+        partialStatsRunning = true
+
+        ApplicationManager.getApplication().executeOnPooledThread {
+            var byPath: Map<String, HgDiffStat>? = null
+            try {
+                val res = HgCommandRunner(repoRoot).runToBytesDetailed(
+                    DiffStatsPlan.arguments(action.range, action.paths, ignoreEolChanges)
+                )
+                if (res.exitCode == 0) {
+                    byPath = HgDiffStatParser.parse(res.stdout)
+                } else {
+                    LOG.warn("Diff stats are unavailable: ${HgFailure.message(res.failedToStart, res.stderr)}")
+                }
+            } finally {
+                val stats = byPath
+                onEdt {
+                    partialStatsRunning = false
+                    val current = refreshStamp == refreshId && statsStamp == statsRequestId
+                    if (stats != null && current) {
+                        applyPartialStats(mapOf(action.range to stats), targetRev, action.keys)
+                    }
+                    flushPendingStatsKeys()
+                }
+            }
+        }
+    }
+
+    private fun applyPartialStats(
+        stats: Map<DiffRange, Map<String, HgDiffStat>>,
+        targetRev: String,
+        keys: Set<String>
+    ) {
+        val counted = DiffStatsPlan.applyStatsToKeys(sourceFiles, stats, targetRev, keys)
+        val recounted = counted.filterIndexed { index, item -> item != sourceFiles[index] }
+        if (recounted.isEmpty()) return
+        sourceFiles.clear()
+        sourceFiles.addAll(counted)
+        republishStatuses(recounted)
+        if (listMode == HgListMode.FILES) {
+            renderFiltered(trace = null, reuseTree = true)
+        } else {
+            updateSummary(shownFiles())
+        }
+    }
+
+    private fun flushPendingStatsKeys() = recountStats(emptyList())
+
     private fun publishStatuses() {
         comparison = comparison.withItems(sourceFiles)
         val repoRoot = comparison.repoRoot ?: return
         project.service<HgFileStatusService>().update(repoRoot, sourceFiles)
+    }
+
+    private fun republishStatuses(items: List<HgFileItem>) {
+        comparison = comparison.withItemsMerged(items)
+        val repoRoot = comparison.repoRoot ?: return
+        project.service<HgFileStatusService>().merge(repoRoot, items)
     }
 
     private fun shownFiles(): List<HgFileItem> {
@@ -1084,9 +1197,9 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         }
     }
 
-    private fun scheduleFileChangeReaction() {
+    private fun scheduleFileChangeReaction(delayMs: Int = FILE_CHANGE_DELAY_MS) {
         fileChangeAlarm.cancelAllRequests()
-        fileChangeAlarm.addRequest({ reactToChangedFiles() }, FILE_CHANGE_DELAY_MS)
+        fileChangeAlarm.addRequest({ reactToChangedFiles() }, delayMs)
     }
 
     private fun reactToChangedFiles() {
@@ -1103,8 +1216,112 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         if (reaction.diffKeys.isNotEmpty()) {
             project.service<HgDiffTabManager>().reloadChangesTabs(reaction.diffKeys)
         }
-        if (!rescanRequested && !reaction.rescanTodos) return
-        if (!busy && listMode == HgListMode.TODO) scanTodos()
+        if (reaction.ignoreRulesChanged) {
+            quietKeys = emptySet()
+            refreshPending = true
+        }
+        if (reaction.repoStateTouched) repoStateProbePending = true
+        pendingUnlistedKeys.addAll(reaction.unlistedKeys)
+        if (refreshPending) {
+            refreshPending = false
+            if (requestRefresh()) return
+        }
+        recountStats(reaction.changedKeys)
+        if (rescanRequested || reaction.rescanTodos) {
+            if (listMode == HgListMode.TODO) {
+                if (busy) todoRescanPending = true else scanTodos()
+            }
+        }
+        probeRepoState()
+        probeUnlistedPaths()
+        if (fileChangeWorkPending) scheduleFileChangeReaction(BUSY_RETRY_DELAY_MS)
+    }
+
+    private val fileChangeWorkPending: Boolean
+        get() = refreshPending || repoStateProbePending || todoRescanPending ||
+            pendingUnlistedKeys.isNotEmpty() || pendingChangedPaths.isNotEmpty()
+
+    private fun requestRefresh(): Boolean {
+        if (busy) {
+            refreshPending = true
+            scheduleFileChangeReaction(BUSY_RETRY_DELAY_MS)
+            return false
+        }
+        refresh()
+        return true
+    }
+
+    private fun probeRepoState() {
+        if (!repoStateProbePending || repoStateRunning || busy) return
+        val repoRoot = comparison.repoRoot ?: return
+        repoStateProbePending = false
+        repoStateRunning = true
+        val stamp = probeId
+        ApplicationManager.getApplication().executeOnPooledThread {
+            var probed = RepoState.UNKNOWN
+            try {
+                val result = HgCommandRunner(repoRoot).runToText(RepoState.ARGUMENTS)
+                if (result.success) probed = RepoState.parse(result.stdout)
+                else LOG.warn("Working directory state is unavailable: ${HgFailure.message(result)}")
+            } finally {
+                val state = probed
+                onEdt {
+                    repoStateRunning = false
+                    if (stamp == probeId && state.isKnown) {
+                        val moved = RepoState.changed(knownRepoState, state)
+                        knownRepoState = state
+                        if (moved) requestRefresh()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun probeUnlistedPaths() {
+        if (probeRunning || busy || pendingUnlistedKeys.isEmpty()) return
+        val repoRoot = comparison.repoRoot ?: return
+        when (val action = UnlistedPathsProbe.of(pendingUnlistedKeys, quietKeys)) {
+            UnlistedPathsAction.Ignore -> pendingUnlistedKeys.clear()
+            UnlistedPathsAction.Reload -> {
+                pendingUnlistedKeys.clear()
+                requestRefresh()
+            }
+            is UnlistedPathsAction.Ask -> {
+                pendingUnlistedKeys.removeAll(action.keys.toSet())
+                askAboutUnlistedPaths(repoRoot, action.keys)
+            }
+        }
+    }
+
+    private fun askAboutUnlistedPaths(repoRoot: File, keys: List<String>) {
+        val untracked = showUntracked
+        val stamp = probeId
+        probeRunning = true
+        ApplicationManager.getApplication().executeOnPooledThread {
+            var answer: HgResult? = null
+            try {
+                answer = HgCommandRunner(repoRoot)
+                    .runToText(UnlistedPathsProbe.arguments(keys, untracked))
+            } finally {
+                val result = answer
+                onEdt {
+                    probeRunning = false
+                    if (stamp != probeId) return@onEdt
+                    if (result == null || !result.success) {
+                        val details = result?.let { HgFailure.message(it) } ?: "hg status did not finish"
+                        LOG.warn("Unlisted paths are unchecked: $details")
+                        requestRefresh()
+                        return@onEdt
+                    }
+                    if (UnlistedPathsProbe.listable(result.stdout, untracked)) {
+                        requestRefresh()
+                        return@onEdt
+                    }
+                    quietKeys = UnlistedPathsProbe.remembered(quietKeys, keys)
+                    probeUnlistedPaths()
+                }
+            }
+        }
     }
 
     private fun takePendingChangedPaths(): List<String> = synchronized(pendingChangedPaths) {
@@ -1449,6 +1666,9 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun endTask() {
         if (activeTasks > 0) activeTasks--
         toolbar?.updateActionsAsync()
+        if (busy) return
+        flushPendingStatsKeys()
+        if (fileChangeWorkPending) scheduleFileChangeReaction()
     }
 
     private companion object {
@@ -1469,6 +1689,8 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         const val REVISIONS_DEBOUNCE_MS = 300
 
         const val FILE_CHANGE_DELAY_MS = 400
+
+        const val BUSY_RETRY_DELAY_MS = 2000
 
         const val COL_TREE = 0
         const val COL_STATS = 1

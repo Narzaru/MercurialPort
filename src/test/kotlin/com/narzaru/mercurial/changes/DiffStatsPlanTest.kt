@@ -161,6 +161,75 @@ class DiffStatsPlanTest {
     }
 
     @Test
+    fun `counting one file leaves the others as they were`() {
+        val files = listOf(
+            item("a.kt").copy(added = 1, removed = 1),
+            item("b.kt").copy(added = 7, removed = 7)
+        )
+        val stats = mapOf(DiffRange("42", "") to mapOf("a.kt" to HgDiffStat(3, 0)))
+
+        val counted = DiffStatsPlan.applyStatsToKeys(files, stats, "42", setOf("a.kt"))
+
+        assertEquals(listOf(3, 7), counted.map { it.added })
+        assertEquals(listOf(0, 7), counted.map { it.removed })
+    }
+
+    @Test
+    fun `a file edited back to its base becomes unchanged`() {
+        val files = listOf(item("a.kt").copy(added = 3, removed = 1))
+
+        val counted = DiffStatsPlan.applyStatsToKeys(files, emptyMap(), "42", setOf("a.kt")).single()
+
+        assertTrue(counted.isUnchanged)
+        assertEquals(DiffStatsPlan.UNCHANGED_STATUS, counted.status)
+        assertEquals(0, counted.added)
+    }
+
+    @Test
+    fun `an unchanged file edited again is modified once more`() {
+        val files = listOf(
+            item("a.kt").copy(status = DiffStatsPlan.UNCHANGED_STATUS, isUnchanged = true)
+        )
+        val stats = mapOf(DiffRange("42", "") to mapOf("a.kt" to HgDiffStat(2, 1)))
+
+        val counted = DiffStatsPlan.applyStatsToKeys(files, stats, "42", setOf("a.kt")).single()
+
+        assertFalse(counted.isUnchanged)
+        assertEquals("M", counted.status)
+        assertEquals(2, counted.added)
+    }
+
+    @Test
+    fun `an added file counted alone never turns unchanged`() {
+        val files = listOf(HgFileItem(status = "A", path = "a.kt", added = 4))
+
+        val counted = DiffStatsPlan.applyStatsToKeys(files, emptyMap(), "42", setOf("a.kt")).single()
+
+        assertFalse(counted.isUnchanged)
+        assertEquals("A", counted.status)
+        assertEquals(0, counted.added)
+    }
+
+    @Test
+    fun `a renamed file counted alone keeps its source path`() {
+        val files = listOf(item("new.kt", copiedFrom = "old.kt"))
+        val stats = mapOf(DiffRange("42", "") to mapOf("old.kt" to HgDiffStat(5, 2)))
+
+        val counted = DiffStatsPlan.applyStatsToKeys(files, stats, "42", setOf("new.kt")).single()
+
+        assertEquals(5, counted.added)
+        assertEquals(2, counted.removed)
+        assertFalse(counted.isUnchanged)
+    }
+
+    @Test
+    fun `a key that matches nothing changes nothing`() {
+        val files = listOf(item("a.kt").copy(added = 1))
+
+        assertEquals(files, DiffStatsPlan.applyStatsToKeys(files, emptyMap(), "42", setOf("b.kt")))
+    }
+
+    @Test
     fun `windows separators match the reported path`() {
         val stats = mapOf(DiffRange("42", "") to mapOf("src/a.kt" to HgDiffStat(1, 0)))
         val counted = DiffStatsPlan.applyStats(listOf(item("src\\a.kt")), stats, "42").single()

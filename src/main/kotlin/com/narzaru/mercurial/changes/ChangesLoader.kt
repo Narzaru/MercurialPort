@@ -7,7 +7,7 @@ import com.narzaru.mercurial.hg.HgStatusParser
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
 
-class ChangesResult(
+data class ChangesResult(
     val files: List<HgFileItem>,
     val targetRev: String,
     val statusText: String,
@@ -21,7 +21,9 @@ class ChangesResult(
 
     val revsByFile: Map<String, List<String>> = emptyMap(),
 
-    val statsPaths: Map<DiffRange, List<String>> = emptyMap()
+    val statsPaths: Map<DiffRange, List<String>> = emptyMap(),
+
+    val currentInfo: String = ""
 )
 
 class ChangesLoader(
@@ -37,14 +39,26 @@ class ChangesLoader(
         untracked: Boolean,
         trace: LoadTrace? = null
     ): ChangesResult {
-        val usesRevisions = mode.usesRevisions
         val earlyTargetRev = when (mode) {
             HgDisplayMode.CUSTOM_BRANCH -> customBranch
             HgDisplayMode.MERGE -> BranchRevisions.mergeBaseRevset(customBranch)
             HgDisplayMode.UNCOMMITTED -> "."
             else -> null
         }
-        val head = headQueries(usesRevisions, earlyTargetRev, trace)
+        val head = headQueries(mode.usesRevisions, earlyTargetRev, trace)
+        return loadAt(mode, customBranch, untracked, earlyTargetRev, head, trace)
+            .copy(currentInfo = head.currentInfo)
+    }
+
+    private fun loadAt(
+        mode: HgDisplayMode,
+        customBranch: String,
+        untracked: Boolean,
+        earlyTargetRev: String?,
+        head: HeadQueries,
+        trace: LoadTrace?
+    ): ChangesResult {
+        val usesRevisions = mode.usesRevisions
         val branch = head.branch
         val revisions = head.revisions
         val selection = if (usesRevisions && RevisionsSync.isBranchKnown(branch)) {
