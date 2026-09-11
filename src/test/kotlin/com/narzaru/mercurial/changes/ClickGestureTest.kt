@@ -14,6 +14,13 @@ class ClickGestureTest {
     }
 
     @Test
+    fun `a double click with a modifier still holds the modifier`() {
+        assertFalse(ClickGesture.changesSelectionOnly(2, InputEvent.SHIFT_DOWN_MASK))
+        assertTrue(ClickGesture.usesSelectionModifiers(InputEvent.SHIFT_DOWN_MASK))
+        assertFalse(ClickGesture.usesSelectionModifiers(InputEvent.ALT_DOWN_MASK))
+    }
+
+    @Test
     fun `a shift click only extends the selection`() {
         assertTrue(ClickGesture.changesSelectionOnly(1, InputEvent.SHIFT_DOWN_MASK))
     }

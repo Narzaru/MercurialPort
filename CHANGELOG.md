@@ -6,8 +6,10 @@
 ### Changed
 - **The revision strip keeps every click.** A revision unchecked while the list was still
   reloading no longer comes back, and the choice stays as made.
-- **A range of revisions is picked with Shift.** A Shift-click sets every revision between the
-  last one clicked and this one to the same state; a plain click still switches a single one.
+- **The revision strip is a list now.** Rows are selected the way a list's rows are — click,
+  Shift-click, Ctrl-click, arrows — and a click on a revision's text selects its row instead of
+  switching the checkbox. The checkbox is switched by a click on the checkbox itself or by Space,
+  and the new state goes to every selected row at once.
 
 ## [1.0.8] - 2026-09-11
 ### Added

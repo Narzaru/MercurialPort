@@ -9,8 +9,11 @@ object ClickGesture {
     private const val SELECTION_MODIFIERS =
         InputEvent.SHIFT_DOWN_MASK or InputEvent.CTRL_DOWN_MASK or InputEvent.META_DOWN_MASK
 
+    fun usesSelectionModifiers(modifiersEx: Int): Boolean =
+        (modifiersEx and SELECTION_MODIFIERS) != 0
+
     fun changesSelectionOnly(clickCount: Int, modifiersEx: Int): Boolean =
-        clickCount == 1 && (modifiersEx and SELECTION_MODIFIERS) != 0
+        clickCount == 1 && usesSelectionModifiers(modifiersEx)
 
     fun onFile(clickCount: Int, modifiersEx: Int, alreadyActivated: Boolean): FileClickAction = when {
         changesSelectionOnly(clickCount, modifiersEx) -> FileClickAction.IGNORE

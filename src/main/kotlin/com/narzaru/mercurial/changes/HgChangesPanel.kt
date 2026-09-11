@@ -183,7 +183,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private val summaryLabel = JBLabel(" ")
     private val filtersRow = JPanel(BorderLayout(4, 0))
     private val modeRow = JPanel(BorderLayout(4, 0))
-    private val revisionsBar = RevisionsBar(::toggleRevision, ::resetRevisions)
+    private val revisionsBar = RevisionsBar(::toggleRevisions, ::resetRevisions)
 
     private val revisionsSplitter = JBSplitter(true, REVISIONS_PROPORTION_KEY, DEFAULT_TREE_PROPORTION)
 
@@ -726,24 +726,22 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         repaint()
     }
 
-    private fun toggleRevision(revision: HgRevision, selected: Boolean, modifiers: Int) {
-        val pick = RevisionPicking.apply(
+    private fun toggleRevisions(picked: List<HgRevision>, selected: Boolean) {
+        val selection = RevisionPicking.apply(
             branchRevisions,
             revisionsState.selection,
-            revisionsState.anchor,
-            revision,
-            RevisionGesture.kindOf(modifiers),
+            picked,
             selected
         )
-        revisionsState = revisionsState.copy(selection = pick.selection, anchor = pick.anchor)
-        storeRevisionOverrides(pick.selection.toStorage())
-        revisionsBar.applySelection(branchRevisions, revisionsState.selection)
-        revisionsBar.updateHeader(branchRevisions, revisionsState.selection)
+        revisionsState = revisionsState.copy(selection = selection)
+        storeRevisionOverrides(selection.toStorage())
+        revisionsBar.applySelection(branchRevisions, selection)
+        revisionsBar.updateHeader(branchRevisions, selection)
         scheduleRevisionsRefresh()
     }
 
     private fun resetRevisions() {
-        revisionsState = revisionsState.copy(selection = RevisionSelection.DEFAULT, anchor = "")
+        revisionsState = revisionsState.copy(selection = RevisionSelection.DEFAULT)
         storeRevisionOverrides(emptyList())
         revisionsBar.update(branchRevisions, revisionsState.selection)
         scheduleRevisionsRefresh()

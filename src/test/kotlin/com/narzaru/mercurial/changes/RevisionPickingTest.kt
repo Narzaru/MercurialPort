@@ -1,17 +1,11 @@
 package com.narzaru.mercurial.changes
 
-import java.awt.event.ActionEvent
-import java.awt.event.InputEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RevisionPickingTest {
-
-    private val LEGACY_BUTTON1_MASK = 16
-
-    private val LEGACY_BUTTON2_MASK = 8
 
     private val log = listOf(
         "2547|d1d82b2|-1|Ivanov|2026-08-10 11:02 +0300|PSA-12517 fpz in zones",
@@ -23,192 +17,161 @@ class RevisionPickingTest {
 
     private val revisions = BranchRevisions.parse(log)
 
+    private val shown = revisions.map { it.node }
+
     private fun revision(node: String) = revisions.first { it.node == node }
 
-    private fun selectedNodes(pick: RevisionPick) = pick.selection.selectedNodes(revisions)
+    private fun selectedNodes(selection: RevisionSelection) = selection.selectedNodes(revisions)
 
-    private fun toggle(
+    private fun pick(
         selection: RevisionSelection,
-        anchor: String,
-        node: String,
-        desired: Boolean
-    ) = RevisionPicking.apply(
-        revisions, selection, anchor, revision(node), RevisionClickKind.TOGGLE, desired
-    )
-
-    private fun range(
-        selection: RevisionSelection,
-        anchor: String,
-        node: String,
-        desired: Boolean
-    ) = RevisionPicking.apply(
-        revisions, selection, anchor, revision(node), RevisionClickKind.RANGE, desired
-    )
+        desired: Boolean,
+        vararg nodes: String
+    ) = RevisionPicking.apply(revisions, selection, nodes.map { revision(it) }, desired)
 
     @Test
-    fun `a plain click is a toggle`() {
-        assertEquals(RevisionClickKind.TOGGLE, RevisionGesture.kindOf(0))
+    fun `one revision drops out of the review`() {
+        val selection = pick(RevisionSelection.DEFAULT, false, "97fbf27")
+        assertEquals(listOf("d1d82b2", "702a733"), selectedNodes(selection))
     }
 
     @Test
-    fun `a ctrl click is still a toggle`() {
-        assertEquals(RevisionClickKind.TOGGLE, RevisionGesture.kindOf(ActionEvent.CTRL_MASK))
+    fun `one merge revision joins the review`() {
+        val selection = pick(RevisionSelection.DEFAULT, true, "8fcae09")
+        assertEquals(listOf("d1d82b2", "8fcae09", "97fbf27", "702a733"), selectedNodes(selection))
     }
 
     @Test
-    fun `a shift click asks for a range`() {
-        assertEquals(RevisionClickKind.RANGE, RevisionGesture.kindOf(ActionEvent.SHIFT_MASK))
+    fun `several revisions take the same state at once`() {
+        val selection = pick(RevisionSelection.DEFAULT, false, "d1d82b2", "97fbf27", "702a733")
+        assertEquals(emptyList<String>(), selectedNodes(selection))
     }
 
     @Test
-    fun `a shift click reported with the extended mask asks for a range`() {
-        assertEquals(RevisionClickKind.RANGE, RevisionGesture.kindOf(InputEvent.SHIFT_DOWN_MASK))
-    }
-
-    @Test
-    fun `a shift click reported together with another modifier asks for a range`() {
-        assertEquals(
-            RevisionClickKind.RANGE,
-            RevisionGesture.kindOf(ActionEvent.SHIFT_MASK or ActionEvent.ALT_MASK)
-        )
-    }
-
-    @Test
-    fun `a click of the first button alone is a toggle`() {
-        assertEquals(RevisionClickKind.TOGGLE, RevisionGesture.kindOf(LEGACY_BUTTON1_MASK))
-    }
-
-    @Test
-    fun `a click of the middle button alone is a toggle`() {
-        assertEquals(RevisionClickKind.TOGGLE, RevisionGesture.kindOf(LEGACY_BUTTON2_MASK))
-    }
-
-    @Test
-    fun `a ctrl click reported with the extended mask is still a toggle`() {
-        assertEquals(RevisionClickKind.TOGGLE, RevisionGesture.kindOf(InputEvent.CTRL_DOWN_MASK))
-    }
-
-    @Test
-    fun `an alt click reported with the extended mask is still a toggle`() {
-        assertEquals(RevisionClickKind.TOGGLE, RevisionGesture.kindOf(InputEvent.ALT_DOWN_MASK))
-    }
-
-    @Test
-    fun `a plain click changes one revision and sets the anchor`() {
-        val pick = toggle(RevisionSelection.DEFAULT, "", "97fbf27", false)
-        assertEquals(listOf("d1d82b2", "702a733"), selectedNodes(pick))
-        assertEquals("97fbf27", pick.anchor)
-    }
-
-    @Test
-    fun `a plain click on a merge selects it`() {
-        val pick = toggle(RevisionSelection.DEFAULT, "", "8fcae09", true)
-        assertEquals(listOf("d1d82b2", "8fcae09", "97fbf27", "702a733"), selectedNodes(pick))
-        assertEquals("8fcae09", pick.anchor)
-    }
-
-    @Test
-    fun `a shift click without an anchor works as a toggle`() {
-        val pick = range(RevisionSelection.DEFAULT, "", "97fbf27", false)
-        assertEquals(listOf("d1d82b2", "702a733"), selectedNodes(pick))
-        assertEquals("97fbf27", pick.anchor)
-    }
-
-    @Test
-    fun `a shift click down the list clears the whole range`() {
-        val anchored = toggle(RevisionSelection.DEFAULT, "", "d1d82b2", false)
-        val pick = range(anchored.selection, anchored.anchor, "97fbf27", false)
-        assertEquals(listOf("702a733"), selectedNodes(pick))
-        assertEquals("d1d82b2", pick.anchor)
-    }
-
-    @Test
-    fun `a shift click up the list clears the same range`() {
-        val anchored = toggle(RevisionSelection.DEFAULT, "", "97fbf27", false)
-        val pick = range(anchored.selection, anchored.anchor, "d1d82b2", false)
-        assertEquals(listOf("702a733"), selectedNodes(pick))
-        assertEquals("97fbf27", pick.anchor)
-    }
-
-    @Test
-    fun `a range covers the merges it runs over`() {
-        val anchored = toggle(RevisionSelection.DEFAULT, "", "d1d82b2", true)
-        val pick = range(anchored.selection, anchored.anchor, "702a733", true)
+    fun `a mixed set of revisions ends up in one state`() {
+        val selection = pick(RevisionSelection.DEFAULT, true, "d1d82b2", "8fcae09", "38e0420")
         assertEquals(
             listOf("d1d82b2", "8fcae09", "97fbf27", "38e0420", "702a733"),
-            selectedNodes(pick)
+            selectedNodes(selection)
         )
     }
 
     @Test
-    fun `a range leaves the revisions outside of it alone`() {
-        val anchored = toggle(RevisionSelection.DEFAULT, "", "8fcae09", true)
-        val pick = range(anchored.selection, anchored.anchor, "97fbf27", true)
-        assertEquals(listOf("d1d82b2", "8fcae09", "97fbf27", "702a733"), selectedNodes(pick))
+    fun `the revisions left out keep their marks`() {
+        val cleared = pick(RevisionSelection.DEFAULT, false, "d1d82b2")
+        val selection = pick(cleared, true, "8fcae09")
+        assertEquals(listOf("8fcae09", "97fbf27", "702a733"), selectedNodes(selection))
     }
 
     @Test
-    fun `a second shift click from the same anchor shrinks the range`() {
-        val anchored = toggle(RevisionSelection.DEFAULT, "", "d1d82b2", false)
-        val wide = range(anchored.selection, anchored.anchor, "702a733", false)
-        assertEquals(emptyList<String>(), selectedNodes(wide))
-        val narrow = range(wide.selection, wide.anchor, "8fcae09", true)
-        assertEquals(listOf("d1d82b2", "8fcae09"), selectedNodes(narrow))
-        assertEquals("d1d82b2", narrow.anchor)
+    fun `an empty set of revisions changes nothing`() {
+        val selection = RevisionPicking.apply(revisions, RevisionSelection.DEFAULT, emptyList(), false)
+        assertEquals(listOf("d1d82b2", "97fbf27", "702a733"), selectedNodes(selection))
+        assertEquals(emptyList<String>(), selection.toStorage())
     }
 
     @Test
-    fun `an anchor lost with the branch falls back to a toggle`() {
-        val pick = range(RevisionSelection.DEFAULT, "0000000", "97fbf27", false)
-        assertEquals(listOf("d1d82b2", "702a733"), selectedNodes(pick))
-        assertEquals("97fbf27", pick.anchor)
-    }
-
-    @Test
-    fun `a click on a revision outside of the list changes nothing`() {
+    fun `a revision outside of the list is skipped`() {
         val gone = HgRevision("2700", "abcdef0", false, "Ivanov", "2026-08-20 10:00 +0300", "gone")
-        val pick = RevisionPicking.apply(
-            revisions, RevisionSelection.DEFAULT, "d1d82b2", gone, RevisionClickKind.TOGGLE, false
+        val selection = RevisionPicking.apply(revisions, RevisionSelection.DEFAULT, listOf(gone), false)
+        assertEquals(listOf("d1d82b2", "97fbf27", "702a733"), selectedNodes(selection))
+        assertEquals(emptyList<String>(), selection.toStorage())
+    }
+
+    @Test
+    fun `the revisions of the list are kept even with an unknown one alongside`() {
+        val gone = HgRevision("2700", "abcdef0", false, "Ivanov", "2026-08-20 10:00 +0300", "gone")
+        val selection = RevisionPicking.apply(
+            revisions, RevisionSelection.DEFAULT, listOf(gone, revision("97fbf27")), false
         )
-        assertEquals(listOf("d1d82b2", "97fbf27", "702a733"), selectedNodes(pick))
-        assertEquals("d1d82b2", pick.anchor)
+        assertEquals(listOf("d1d82b2", "702a733"), selectedNodes(selection))
     }
 
     @Test
-    fun `a range back to the anchor itself changes only the anchor`() {
-        val anchored = toggle(RevisionSelection.DEFAULT, "", "97fbf27", false)
-        val pick = range(anchored.selection, anchored.anchor, "97fbf27", true)
-        assertEquals(listOf("d1d82b2", "97fbf27", "702a733"), selectedNodes(pick))
-        assertEquals("97fbf27", pick.anchor)
-    }
-
-    @Test
-    fun `a click with no revisions at hand changes nothing`() {
-        val pick = RevisionPicking.apply(
-            emptyList(), RevisionSelection.DEFAULT, "d1d82b2", revision("97fbf27"),
-            RevisionClickKind.TOGGLE, false
+    fun `a pick with no revisions at hand changes nothing`() {
+        val selection = RevisionPicking.apply(
+            emptyList(), RevisionSelection.DEFAULT, listOf(revision("97fbf27")), false
         )
-        assertEquals(RevisionSelection.DEFAULT, pick.selection)
-        assertEquals("d1d82b2", pick.anchor)
+        assertEquals(RevisionSelection.DEFAULT, selection)
+        assertEquals(emptyList<String>(), selection.toStorage())
     }
 
     @Test
-    fun `a shift click with no revisions at hand keeps the anchor`() {
-        val pick = RevisionPicking.apply(
-            emptyList(), RevisionSelection.DEFAULT, "", revision("97fbf27"),
-            RevisionClickKind.RANGE, false
-        )
-        assertEquals(emptyList<String>(), pick.selection.selectedNodes(emptyList()))
-        assertEquals("", pick.anchor)
+    fun `a revision back in its default state leaves no override behind`() {
+        val cleared = pick(RevisionSelection.DEFAULT, false, "97fbf27")
+        assertEquals(listOf("97fbf27=0"), cleared.toStorage())
+        val restored = pick(cleared, true, "97fbf27")
+        assertEquals(emptyList<String>(), restored.toStorage())
+        assertTrue(restored.isDefaultFor(revisions))
     }
 
     @Test
-    fun `a range survives a trip through the stored overrides`() {
-        val anchored = toggle(RevisionSelection.DEFAULT, "", "d1d82b2", false)
-        val picked = range(anchored.selection, anchored.anchor, "38e0420", true)
-        val restored = RevisionSelection.fromStorage(picked.selection.toStorage())
+    fun `a pick survives a trip through the stored overrides`() {
+        val picked = pick(RevisionSelection.DEFAULT, true, "d1d82b2", "8fcae09", "38e0420")
+        val restored = RevisionSelection.fromStorage(picked.toStorage())
         assertEquals(selectedNodes(picked), restored.selectedNodes(revisions))
-        assertEquals(picked.selection.toStorage(), restored.toStorage())
+        assertEquals(picked.toStorage(), restored.toStorage())
+    }
+
+    @Test
+    fun `a toggle inside the selection takes the whole selection`() {
+        val toggle = RevisionToggling.targets(
+            shown, "97fbf27", listOf("d1d82b2", "8fcae09", "97fbf27"), listOf("97fbf27"), false
+        )
+        assertEquals(listOf("d1d82b2", "8fcae09", "97fbf27"), toggle.nodes)
+        assertTrue(toggle.restoresSelection)
+    }
+
+    @Test
+    fun `a toggle outside the selection takes the row alone`() {
+        val toggle = RevisionToggling.targets(
+            shown, "38e0420", listOf("d1d82b2", "8fcae09"), listOf("38e0420"), false
+        )
+        assertEquals(listOf("38e0420"), toggle.nodes)
+        assertFalse(toggle.restoresSelection)
+    }
+
+    @Test
+    fun `a toggle with nothing selected takes the row alone`() {
+        val toggle = RevisionToggling.targets(shown, "38e0420", emptyList(), emptyList(), false)
+        assertEquals(listOf("38e0420"), toggle.nodes)
+        assertFalse(toggle.restoresSelection)
+    }
+
+    @Test
+    fun `a toggled revision gone from the list toggles nothing`() {
+        val toggle = RevisionToggling.targets(
+            shown, "abcdef0", listOf("d1d82b2", "abcdef0"), listOf("abcdef0"), false
+        )
+        assertEquals(emptyList<String>(), toggle.nodes)
+        assertFalse(toggle.restoresSelection)
+    }
+
+    @Test
+    fun `the revisions gone from the list drop out of the targets`() {
+        val toggle = RevisionToggling.targets(
+            shown, "97fbf27", listOf("abcdef0", "97fbf27", "702a733"), listOf("97fbf27"), false
+        )
+        assertEquals(listOf("97fbf27", "702a733"), toggle.nodes)
+        assertTrue(toggle.restoresSelection)
+    }
+
+    @Test
+    fun `a gesture with modifiers takes the selection it left behind`() {
+        val toggle = RevisionToggling.targets(
+            shown, "702a733", listOf("d1d82b2", "8fcae09", "97fbf27"), listOf("d1d82b2", "8fcae09", "97fbf27", "702a733"), true
+        )
+        assertEquals(listOf("d1d82b2", "8fcae09", "97fbf27", "702a733"), toggle.nodes)
+        assertFalse(toggle.restoresSelection)
+    }
+
+    @Test
+    fun `a gesture with modifiers that drops the row out toggles the row alone`() {
+        val toggle = RevisionToggling.targets(
+            shown, "8fcae09", listOf("d1d82b2", "8fcae09", "97fbf27"), listOf("d1d82b2", "97fbf27"), true
+        )
+        assertEquals(listOf("8fcae09"), toggle.nodes)
+        assertFalse(toggle.restoresSelection)
     }
 
     @Test
@@ -223,41 +186,36 @@ class RevisionPickingTest {
         val state = RevisionsSync.afterLoad(RevisionsState(), "feature", stored)
         assertEquals("feature", state.branch)
         assertEquals(listOf("d1d82b2", "702a733"), state.selection.selectedNodes(revisions))
-        assertEquals("", state.anchor)
     }
 
     @Test
     fun `a load of the same branch leaves the picked selection alone`() {
-        val picked = toggle(RevisionSelection.DEFAULT, "", "8fcae09", true)
-        val state = RevisionsState("feature", picked.selection, picked.anchor)
+        val state = RevisionsState("feature", pick(RevisionSelection.DEFAULT, true, "8fcae09"))
         val reloaded = RevisionsSync.afterLoad(state, "feature", RevisionSelection.DEFAULT)
         assertEquals(state, reloaded)
     }
 
     @Test
     fun `a load without a branch name leaves the picked selection alone`() {
-        val picked = toggle(RevisionSelection.DEFAULT, "", "8fcae09", true)
-        val state = RevisionsState("feature", picked.selection, picked.anchor)
+        val state = RevisionsState("feature", pick(RevisionSelection.DEFAULT, true, "8fcae09"))
         val reloaded = RevisionsSync.afterLoad(state, "", RevisionSelection.DEFAULT)
         assertEquals(state, reloaded)
     }
 
     @Test
     fun `a load without a branch name leaves the branch unknown`() {
-        val picked = toggle(RevisionSelection.DEFAULT, "", "8fcae09", true)
-        val state = RevisionsState("", picked.selection, picked.anchor)
+        val state = RevisionsState("", pick(RevisionSelection.DEFAULT, true, "8fcae09"))
         val reloaded = RevisionsSync.afterLoad(state, "", RevisionSelection.fromStorage(listOf("8fcae09=0")))
         assertEquals(state, reloaded)
         assertFalse(RevisionsSync.isBranchKnown(reloaded.branch))
     }
 
     @Test
-    fun `another branch takes over the selection and drops the anchor`() {
-        val picked = toggle(RevisionSelection.DEFAULT, "", "8fcae09", true)
-        val state = RevisionsState("feature", picked.selection, picked.anchor)
+    fun `another branch takes over the selection`() {
+        val state = RevisionsState("feature", pick(RevisionSelection.DEFAULT, true, "8fcae09"))
         val stored = RevisionSelection.fromStorage(listOf("d1d82b2=0"))
         val reloaded = RevisionsSync.afterLoad(state, "other", stored)
-        assertEquals(RevisionsState("other", stored, ""), reloaded)
+        assertEquals(RevisionsState("other", stored), reloaded)
         assertEquals(listOf("97fbf27", "702a733"), reloaded.selection.selectedNodes(revisions))
     }
 }
