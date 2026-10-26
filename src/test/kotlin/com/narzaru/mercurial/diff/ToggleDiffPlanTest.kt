@@ -46,6 +46,22 @@ class ToggleDiffPlanTest {
     }
 
     @Test
+    fun `a file shown as a diff in its own tab swaps the two sides`() {
+        assertEquals(
+            ToggleDiffTarget.SwapInline,
+            ToggleDiffPlan.of(false, null, false, false, null, inInlineDiff = true)
+        )
+    }
+
+    @Test
+    fun `swapping in place wins over opening a separate diff tab`() {
+        assertEquals(
+            ToggleDiffTarget.SwapInline,
+            ToggleDiffPlan.of(true, "/repo/a.txt", true, true, "a.txt", inInlineDiff = true)
+        )
+    }
+
+    @Test
     fun `a file outside an editor does nothing`() {
         assertEquals(
             ToggleDiffTarget.None,

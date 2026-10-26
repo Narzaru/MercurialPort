@@ -15,6 +15,8 @@ object DiffStatsPlan {
 
     const val UNCHANGED_STATUS = "♦"
 
+    const val NO_DIFF_HASH = "none"
+
     fun applyStats(
         files: List<HgFileItem>,
         stats: Map<DiffRange, Map<String, HgDiffStat>>,
@@ -30,14 +32,47 @@ object DiffStatsPlan {
         if (HgPaths.key(item.path) in keys) counted(item, stats, targetRev) else item
     }
 
+    fun diffHashes(
+        files: List<HgFileItem>,
+        stats: Map<DiffRange, Map<String, HgDiffStat>>,
+        targetRev: String,
+        contentHashes: Map<String, String> = emptyMap()
+    ): Map<String, String> {
+        val hashes = HashMap<String, String>()
+        for (item in files) {
+            val key = HgPaths.key(item.path)
+            if (isHashedByContent(item)) {
+                contentHashes[key]?.let { hashes[key] = it }
+                continue
+            }
+            val byPath = stats[rangeOf(item, targetRev)] ?: continue
+            hashes[key] = statOf(item, byPath)?.hash?.ifEmpty { null } ?: NO_DIFF_HASH
+        }
+        return hashes
+    }
+
+    fun isHashedByContent(item: HgFileItem): Boolean =
+        item.status == HgStatusParser.UNTRACKED_STATUS && item.headRev.isEmpty()
+
+    fun contentHashedPaths(files: List<HgFileItem>): List<String> =
+        files.filter { isHashedByContent(it) }.map { it.path }
+
+    fun contentHashes(paths: List<String>, hashOf: (String) -> String?): Map<String, String> {
+        val hashes = HashMap<String, String>()
+        for (path in paths) hashOf(path)?.let { hashes[HgPaths.key(path)] = it }
+        return hashes
+    }
+
+    private fun statOf(item: HgFileItem, byPath: Map<String, HgDiffStat>): HgDiffStat? =
+        byPath[HgPaths.normalize(item.path)]
+            ?: item.copiedFrom.takeIf { it.isNotEmpty() }?.let { byPath[HgPaths.normalize(it)] }
+
     private fun counted(
         item: HgFileItem,
         stats: Map<DiffRange, Map<String, HgDiffStat>>,
         targetRev: String
     ): HgFileItem {
-        val byPath = stats[rangeOf(item, targetRev)].orEmpty()
-        val stat = byPath[HgPaths.normalize(item.path)]
-            ?: item.copiedFrom.takeIf { it.isNotEmpty() }?.let { byPath[HgPaths.normalize(it)] }
+        val stat = statOf(item, stats[rangeOf(item, targetRev)].orEmpty())
         val unchanged = statusOf(item) == HgStatusParser.MODIFIED_STATUS && stat == null
         return item.copy(
             status = if (unchanged) UNCHANGED_STATUS else statusOf(item),

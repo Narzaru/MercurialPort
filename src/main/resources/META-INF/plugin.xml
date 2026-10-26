@@ -32,6 +32,7 @@
                     anchor="bottom"
                     factoryClass="com.narzaru.mercurial.changes.HgChangesToolWindowFactory"/>
         <editorTabTitleProvider implementation="com.narzaru.mercurial.status.HgEditorTabTitleProvider"/>
+        <fileEditorProvider implementation="com.narzaru.mercurial.diff.HgInlineDiffProvider"/>
         <actionPromoter implementation="com.narzaru.mercurial.diff.ToggleDiffPromoter"/>
         <applicationConfigurable parentId="tools"
                                  id="mercurial.settings"
@@ -51,6 +52,8 @@
     <applicationListeners>
         <listener class="com.narzaru.mercurial.hg.HgCommandServerCleanup"
                   topic="com.intellij.openapi.project.ProjectCloseListener"/>
+        <listener class="com.narzaru.mercurial.changes.HgDiffRedirectArming"
+                  topic="com.intellij.openapi.actionSystem.ex.AnActionListener"/>
     </applicationListeners>
 
     <actions>

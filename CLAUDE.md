@@ -56,12 +56,20 @@
 Панели (`HgChangesPanel`, `HgFileHistoryPanel`) отвечают только за UI и оркестровку. Всё, что можно
 проверить без запущенной IDE, вынесено отдельно и покрыто тестами в `src/test/kotlin`:
 
-- разбор вывода `hg` — `HgStatusParser`, `HgDiffStatParser`, `HgLogParser`, `HgOutputDecoder`;
+- разбор вывода `hg` — `HgStatusParser`, `HgDiffStatParser` (± и хэш диффа файла),
+  `HgLogParser`, `HgOutputDecoder`;
 - пути — `HgPaths`;
-- состояние окна изменений — `ReviewState` (за интерфейсом `ReviewedPathsStore`), `PathFilter`,
-  `ChangesSettings`, `StatusTextFormatter`, `BranchScope`, `BranchRevisions`;
+- ревью-отметки — `ReviewState` (ключ: ветка + путь + хэш диффа, отложенные отметки до прихода
+  хэша), `ReviewMarks` (хранение по веткам с LRU, за интерфейсом `ReviewMarksStore`, который
+  реализует `ChangesSettings`), `DiffStatsPlan.diffHashes`; неотслеживаемый файл (`?`) в `hg diff`
+  не попадает, его хэш — хэш содержимого с диска (`HgContentHash`, префикс `c:`, выбор файлов —
+  `DiffStatsPlan.isHashedByContent`, частичный пересчёт без запуска `hg` — `PartialStatsPlan`);
+- состояние окна изменений — `PathFilter`, `ChangesSettings`, `StatusTextFormatter`, `BranchScope`,
+  `BranchRevisions`;
 - сборка диффа — `HgPatchApplier`, `FragmentScope`;
-- дерево и отрисовка — `ChangesTreeBuilder`, `ChangesTreeRenderers`, `TextFitter`.
+- дифф вместо файла — `DiffRedirectPolicy`, `NavigationArming`, `DiffNavigationOrigin`,
+  `InlineDiffArming`, `ToggleDiffPlan`, `CaretTransfer`, `JumpToSourceSlot`;
+- дерево и отрисовка — `ChangesTreeBuilder`, `UnreviewedDirs`, `ChangesTreeRenderers`, `TextFitter`.
 
 Новую логику имеет смысл добавлять туда же, а не в панель: внутри Swing-компонента её не вызвать
 из теста.

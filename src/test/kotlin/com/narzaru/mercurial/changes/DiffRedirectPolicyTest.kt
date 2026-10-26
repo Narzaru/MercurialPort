@@ -7,30 +7,30 @@ import org.junit.Test
 class DiffRedirectPolicyTest {
 
     private class Signals(
+        var enabled: Boolean = true,
+        var fromDiff: Boolean = true,
         var eligible: Boolean = true,
-        var restored: Boolean = false,
+        var openedBefore: Boolean = false,
         var openedAsFile: Boolean = false,
         var fromItsDiff: Boolean = false,
-        var enabled: Boolean = true,
-        var tabKey: String? = "key",
-        var caret: Int? = 12
+        var hasDiff: Boolean = true
     ) : DiffRedirectSignals {
 
         val asked = ArrayList<String>()
 
+        override fun redirectEnabled(): Boolean = ask("enabled", enabled)
+
+        override fun startedFromDiff(): Boolean = ask("fromDiff", fromDiff)
+
         override fun fileIsEligible(): Boolean = ask("eligible", eligible)
 
-        override fun tabRestoredBySession(): Boolean = ask("restored", restored)
+        override fun fileWasOpenBeforeJump(): Boolean = ask("openedBefore", openedBefore)
 
         override fun openedAsFileOnPurpose(): Boolean = ask("openedAsFile", openedAsFile)
 
         override fun cameFromItsDiff(): Boolean = ask("fromItsDiff", fromItsDiff)
 
-        override fun redirectEnabled(): Boolean = ask("enabled", enabled)
-
-        override fun diffTabKey(): String? = ask("tabKey", tabKey)
-
-        override fun caretLine(): Int? = ask("caret", caret)
+        override fun fileHasDiff(): Boolean = ask("hasDiff", hasDiff)
 
         private fun <T> ask(name: String, value: T): T {
             asked.add(name)
@@ -41,8 +41,13 @@ class DiffRedirectPolicyTest {
     private fun decide(signals: Signals) = DiffRedirectPolicy.decide(signals)
 
     @Test
-    fun `a changed file opened plainly goes to its diff`() {
-        assertEquals(DiffRedirectDecision.ShowDiff("key", 12), decide(Signals()))
+    fun `a changed file reached from a diff goes to its diff`() {
+        assertEquals(DiffRedirectDecision.ShowDiff, decide(Signals()))
+    }
+
+    @Test
+    fun `a file opened outside a diff is left alone`() {
+        assertEquals(DiffRedirectDecision.KeepFile, decide(Signals(fromDiff = false)))
     }
 
     @Test
@@ -51,8 +56,8 @@ class DiffRedirectPolicyTest {
     }
 
     @Test
-    fun `a tab restored after a restart is left alone`() {
-        assertEquals(DiffRedirectDecision.KeepFile, decide(Signals(restored = true)))
+    fun `a file that was already open when the jump started is left alone`() {
+        assertEquals(DiffRedirectDecision.KeepFile, decide(Signals(openedBefore = true)))
     }
 
     @Test
@@ -72,30 +77,34 @@ class DiffRedirectPolicyTest {
 
     @Test
     fun `a file without a diff is left alone`() {
-        assertEquals(DiffRedirectDecision.KeepFile, decide(Signals(tabKey = null)))
+        assertEquals(DiffRedirectDecision.KeepFile, decide(Signals(hasDiff = false)))
     }
 
     @Test
-    fun `the first line carries no caret over`() {
-        assertEquals(DiffRedirectDecision.ShowDiff("key", null), decide(Signals(caret = 0)))
+    fun `a setting that is off leaves every other signal unasked`() {
+        val signals = Signals(enabled = false)
+        decide(signals)
+        assertEquals(listOf("enabled"), signals.asked)
     }
 
     @Test
-    fun `an unknown caret line carries nothing over`() {
-        assertEquals(DiffRedirectDecision.ShowDiff("key", null), decide(Signals(caret = null)))
+    fun `a jump that did not start in a diff is answered without touching the file`() {
+        val signals = Signals(fromDiff = false)
+        decide(signals)
+        assertTrue(signals.asked.none { it == "openedBefore" || it == "hasDiff" })
     }
 
     @Test
-    fun `a restored tab is answered without consuming the opened as file mark`() {
-        val signals = Signals(restored = true)
+    fun `a file open before the jump is answered without consuming the opened as file mark`() {
+        val signals = Signals(openedBefore = true)
         decide(signals)
         assertTrue(signals.asked.none { it == "openedAsFile" })
     }
 
     @Test
-    fun `the diff of a file is looked up only once the setting allows it`() {
-        val signals = Signals(enabled = false)
+    fun `the diff of a file is looked up last`() {
+        val signals = Signals()
         decide(signals)
-        assertTrue(signals.asked.none { it == "tabKey" })
+        assertEquals("hasDiff", signals.asked.last())
     }
 }

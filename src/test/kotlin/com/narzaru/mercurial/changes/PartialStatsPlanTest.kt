@@ -3,6 +3,7 @@ package com.narzaru.mercurial.changes
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -106,6 +107,28 @@ class PartialStatsPlanTest {
         val files = (1..DiffStatsPlan.MAX_DIFF_PATHS + 1).map { item("file$it.kt") }
 
         assertTrue(of(files, listOf("file1.kt")) is PartialStatsAction.Count)
+    }
+
+    @Test
+    fun `an untracked file is hashed by content without a diff`() {
+        val action = of(listOf(item("a.kt"), item("new.txt", status = "?")), listOf("new.txt"))
+
+        assertEquals(
+            PartialStatsAction.Count(DiffRange("42", ""), emptyList(), setOf("new.txt"), listOf("new.txt")),
+            action
+        )
+        assertFalse((action as PartialStatsAction.Count).needsDiff)
+    }
+
+    @Test
+    fun `untracked files edited along with tracked ones stay out of the diff`() {
+        val action = of(listOf(item("a.kt"), item("new.txt", status = "?")), listOf("a.kt", "new.txt"))
+
+        assertEquals(
+            PartialStatsAction.Count(DiffRange("42", ""), listOf("a.kt"), setOf("a.kt", "new.txt"), listOf("new.txt")),
+            action
+        )
+        assertTrue((action as PartialStatsAction.Count).needsDiff)
     }
 
     @Test

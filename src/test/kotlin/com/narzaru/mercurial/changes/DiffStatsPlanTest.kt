@@ -230,6 +230,92 @@ class DiffStatsPlanTest {
     }
 
     @Test
+    fun `a diff hash is keyed by the file's own path`() {
+        val stats = mapOf(DiffRange("42", "") to mapOf("Src/A.kt" to HgDiffStat(1, 0, "h1")))
+
+        val hashes = DiffStatsPlan.diffHashes(listOf(item("Src\\A.kt")), stats, "42")
+
+        assertEquals(mapOf("src/a.kt" to "h1"), hashes)
+    }
+
+    @Test
+    fun `a renamed file takes the hash found under its source`() {
+        val stats = mapOf(DiffRange("42", "") to mapOf("old.kt" to HgDiffStat(5, 2, "h1")))
+
+        val hashes = DiffStatsPlan.diffHashes(listOf(item("new.kt", copiedFrom = "old.kt")), stats, "42")
+
+        assertEquals(mapOf("new.kt" to "h1"), hashes)
+    }
+
+    @Test
+    fun `a counted file missing from the diff has the empty diff hash`() {
+        val stats = mapOf(DiffRange("42", "") to emptyMap<String, HgDiffStat>())
+
+        val hashes = DiffStatsPlan.diffHashes(listOf(item("a.kt")), stats, "42")
+
+        assertEquals(mapOf("a.kt" to DiffStatsPlan.NO_DIFF_HASH), hashes)
+    }
+
+    @Test
+    fun `a file of an uncounted range gets no hash`() {
+        val stats = mapOf(DiffRange("7", "9") to mapOf("a.kt" to HgDiffStat(1, 0, "h1")))
+
+        assertTrue(DiffStatsPlan.diffHashes(listOf(item("a.kt")), stats, "42").isEmpty())
+    }
+
+    private fun untracked(path: String, head: String = "") = HgFileItem(status = "?", path = path, headRev = head)
+
+    @Test
+    fun `only an untracked file of the working copy is hashed by content`() {
+        assertTrue(DiffStatsPlan.isHashedByContent(untracked("a.kt")))
+        assertFalse(DiffStatsPlan.isHashedByContent(untracked("a.kt", head = "9")))
+        for (status in listOf("M", "A", "R", "!", "→", DiffStatsPlan.UNCHANGED_STATUS)) {
+            assertFalse(status, DiffStatsPlan.isHashedByContent(HgFileItem(status = status, path = "a.kt")))
+        }
+    }
+
+    @Test
+    fun `content hashed paths are the untracked ones`() {
+        val files = listOf(item("a.kt"), untracked("b.kt"), HgFileItem(status = "A", path = "c.kt"), untracked("d.kt"))
+
+        assertEquals(listOf("b.kt", "d.kt"), DiffStatsPlan.contentHashedPaths(files))
+    }
+
+    @Test
+    fun `content hashes are keyed like diff hashes and skip unreadable files`() {
+        val hashes = DiffStatsPlan.contentHashes(listOf("Src\\B.kt", "gone.kt")) { path ->
+            if (path == "gone.kt") null else "c:$path"
+        }
+
+        assertEquals(mapOf("src/b.kt" to "c:Src\\B.kt"), hashes)
+    }
+
+    @Test
+    fun `an untracked file takes its content hash instead of the empty diff hash`() {
+        val stats = mapOf(DiffRange("42", "") to mapOf("a.kt" to HgDiffStat(1, 0, "h1")))
+
+        val hashes = DiffStatsPlan.diffHashes(
+            listOf(item("a.kt"), untracked("b.kt")), stats, "42", mapOf("b.kt" to "c:1")
+        )
+
+        assertEquals(mapOf("a.kt" to "h1", "b.kt" to "c:1"), hashes)
+    }
+
+    @Test
+    fun `an untracked file without a content hash keeps whatever was known`() {
+        val stats = mapOf(DiffRange("42", "") to emptyMap<String, HgDiffStat>())
+
+        assertTrue(DiffStatsPlan.diffHashes(listOf(untracked("b.kt")), stats, "42").isEmpty())
+    }
+
+    @Test
+    fun `an untracked file is hashed by content even when the diff failed`() {
+        val hashes = DiffStatsPlan.diffHashes(listOf(item("a.kt"), untracked("b.kt")), emptyMap(), "42", mapOf("b.kt" to "c:1"))
+
+        assertEquals(mapOf("b.kt" to "c:1"), hashes)
+    }
+
+    @Test
     fun `windows separators match the reported path`() {
         val stats = mapOf(DiffRange("42", "") to mapOf("src/a.kt" to HgDiffStat(1, 0)))
         val counted = DiffStatsPlan.applyStats(listOf(item("src\\a.kt")), stats, "42").single()

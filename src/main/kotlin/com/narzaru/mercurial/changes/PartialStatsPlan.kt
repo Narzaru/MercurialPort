@@ -13,8 +13,12 @@ sealed interface PartialStatsAction {
     data class Count(
         val range: DiffRange,
         val paths: List<String>,
-        val keys: Set<String>
-    ) : PartialStatsAction
+        val keys: Set<String>,
+        val contentPaths: List<String> = emptyList()
+    ) : PartialStatsAction {
+
+        val needsDiff: Boolean get() = paths.isNotEmpty()
+    }
 }
 
 object PartialStatsPlan {
@@ -40,8 +44,17 @@ object PartialStatsPlan {
         val range = ranges.singleOrNull() ?: return PartialStatsAction.CountAll
         if (touched.size > DiffStatsPlan.MAX_DIFF_PATHS) return PartialStatsAction.CountAll
 
-        val paths = DiffStatsPlan.pathsByRange(listOf(range), touched, targetRev)[range]
-            ?: return PartialStatsAction.CountAll
-        return PartialStatsAction.Count(range, paths, touched.mapTo(LinkedHashSet()) { HgPaths.key(it.path) })
+        val (hashed, diffed) = touched.partition { DiffStatsPlan.isHashedByContent(it) }
+        val paths = if (diffed.isEmpty()) {
+            emptyList()
+        } else {
+            DiffStatsPlan.pathsByRange(listOf(range), diffed, targetRev)[range] ?: return PartialStatsAction.CountAll
+        }
+        return PartialStatsAction.Count(
+            range,
+            paths,
+            touched.mapTo(LinkedHashSet()) { HgPaths.key(it.path) },
+            hashed.map { it.path }
+        )
     }
 }

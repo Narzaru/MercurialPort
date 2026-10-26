@@ -1,13 +1,14 @@
 package com.narzaru.mercurial.changes
 
-enum class DiffSide { LEFT, RIGHT }
-
 object CaretTransfer {
 
     fun toDiff(fileLine: Int?): Int? = fileLine?.takeIf { it > 0 }
 
-    fun toFile(side: DiffSide, diffLine: Int?): Int? =
-        if (side == DiffSide.RIGHT) diffLine?.takeIf { it >= 0 } else null
+    fun toFile(diffLine: Int?, showsFileDocument: Boolean, translate: (Int) -> Int?): Int? {
+        val line = diffLine?.takeIf { it >= 0 } ?: return null
+        if (showsFileDocument) return line
+        return translate(line)?.takeIf { it >= 0 } ?: line
+    }
 
     fun fileTarget(transferred: Int?, itemLineNumber: Int): Int? =
         transferred ?: (itemLineNumber - 1).takeIf { itemLineNumber > 0 }

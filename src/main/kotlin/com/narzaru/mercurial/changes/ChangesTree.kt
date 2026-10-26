@@ -8,6 +8,7 @@ class DirNode(var name: String) {
     var added: Int = 0
     var removed: Int = 0
     var reviewedCount: Int = 0
+    var allReviewed: Boolean = false
 
     override fun toString() = name
 }
@@ -18,7 +19,11 @@ class FileNode(val item: HgFileItem) {
 
 object ChangesTreeBuilder {
 
-    fun build(items: List<HgFileItem>, isReviewed: (HgFileItem) -> Boolean): DefaultMutableTreeNode {
+    fun build(
+        items: List<HgFileItem>,
+        scope: List<HgFileItem> = items,
+        isReviewed: (HgFileItem) -> Boolean
+    ): DefaultMutableTreeNode {
         val root = DefaultMutableTreeNode(DirNode(""))
         val dirNodes = HashMap<String, DefaultMutableTreeNode>()
         dirNodes[""] = root
@@ -31,19 +36,20 @@ object ChangesTreeBuilder {
         }
 
         collapseChains(root)
-        aggregate(root, isReviewed)
+        aggregate(root, "", isReviewed, UnreviewedDirs.of(scope, isReviewed))
         return root
     }
 
     fun refresh(
         root: DefaultMutableTreeNode,
         items: List<HgFileItem>,
+        scope: List<HgFileItem> = items,
         isReviewed: (HgFileItem) -> Boolean
     ) {
         val byKey = HashMap<String, HgFileItem>(items.size)
         for (item in items) byKey[TreeRefreshPlan.nodeKey(item)] = item
         replaceItems(root, byKey)
-        aggregate(root, isReviewed)
+        aggregate(root, "", isReviewed, UnreviewedDirs.of(scope, isReviewed))
     }
 
     private fun replaceItems(node: DefaultMutableTreeNode, byKey: Map<String, HgFileItem>) {
@@ -93,12 +99,18 @@ object ChangesTreeBuilder {
         }
     }
 
-    private fun aggregate(node: DefaultMutableTreeNode, isReviewed: (HgFileItem) -> Boolean): DirNode? {
+    private fun aggregate(
+        node: DefaultMutableTreeNode,
+        path: String,
+        isReviewed: (HgFileItem) -> Boolean,
+        unreviewed: UnreviewedDirs
+    ): DirNode? {
         val dir = node.userObject as? DirNode ?: return null
         dir.fileCount = 0
         dir.added = 0
         dir.removed = 0
         dir.reviewedCount = 0
+        dir.allReviewed = unreviewed.allReviewed(path)
 
         for (i in 0 until node.childCount) {
             val child = node.getChildAt(i) as DefaultMutableTreeNode
@@ -109,7 +121,7 @@ object ChangesTreeBuilder {
                     dir.removed += payload.item.removed
                     if (isReviewed(payload.item)) dir.reviewedCount++
                 }
-                is DirNode -> aggregate(child, isReviewed)?.let {
+                is DirNode -> aggregate(child, childPath(path, payload.name), isReviewed, unreviewed)?.let {
                     dir.fileCount += it.fileCount
                     dir.added += it.added
                     dir.removed += it.removed
@@ -119,6 +131,8 @@ object ChangesTreeBuilder {
         }
         return dir
     }
+
+    private fun childPath(parent: String, name: String): String = if (parent.isEmpty()) name else "$parent/$name"
 
     fun filesOf(node: DefaultMutableTreeNode): List<HgFileItem> {
         val result = ArrayList<HgFileItem>()

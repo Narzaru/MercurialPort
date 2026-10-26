@@ -1,7 +1,9 @@
 package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.diff.HgDiffTabManager
+import com.narzaru.mercurial.diff.HgInlineDiffEditor
 import com.narzaru.mercurial.hg.HgPaths
+import com.intellij.diff.chains.DiffRequestChain
 import com.intellij.diff.chains.DiffRequestProducer
 import com.intellij.diff.chains.DiffRequestProducerException
 import com.intellij.diff.chains.SimpleDiffRequestChain
@@ -32,16 +34,59 @@ class HgChangesService(val project: Project) {
 
     private val openedAsFile = ConcurrentHashMap<String, Long>()
 
+    val inlineDiffArming = InlineDiffArming()
+
+    private val inlineDiffs = ConcurrentHashMap<String, MutableSet<HgInlineDiffEditor>>()
+
+    @Volatile
+    private var selectedDiffTabSource: String? = null
+
+    @Volatile
+    private var selectedInlinePath: String? = null
+
     private val requestedDiff = AtomicReference<RequestedDiff?>()
 
     fun openAsFile(path: String) {
         openedAsFile[HgPaths.key(path)] = System.currentTimeMillis() + OPEN_AS_FILE_DEADLINE_MS
     }
 
+    fun peekOpenedAsFile(path: String): Boolean {
+        val deadline = openedAsFile[HgPaths.key(path)] ?: return false
+        return deadline >= System.currentTimeMillis()
+    }
+
     fun takeOpenedAsFile(path: String): Boolean {
         val deadline = openedAsFile.remove(HgPaths.key(path)) ?: return false
         return deadline >= System.currentTimeMillis()
     }
+
+    fun registerInlineDiff(path: String, editor: HgInlineDiffEditor) {
+        inlineDiffs.computeIfAbsent(HgPaths.key(path)) { ConcurrentHashMap.newKeySet() }.add(editor)
+    }
+
+    fun unregisterInlineDiff(path: String, editor: HgInlineDiffEditor) {
+        inlineDiffs.computeIfPresent(HgPaths.key(path)) { _, editors ->
+            editors.remove(editor)
+            editors.ifEmpty { null }
+        }
+    }
+
+    fun selectionChanged(diffTabSource: String?, inlinePath: String?) {
+        selectedDiffTabSource = diffTabSource
+        selectedInlinePath = inlinePath
+    }
+
+    fun selectedDiffSourcePath(): String? {
+        selectedDiffTabSource?.let { return it }
+        val inline = selectedInlinePath ?: return null
+        return if (inlineDiffShowing(inline)) inline else null
+    }
+
+    fun inlineDiffShowing(path: String): Boolean =
+        inlineDiffs[HgPaths.key(path)]?.any { it.showingDiff() } == true
+
+    fun diffChainFor(path: String): DiffRequestChain =
+        SimpleDiffRequestChain.fromProducer(diffProducerFor(path))
 
     fun diffSettingsChanged(changesetsOnly: Boolean) {
         panel?.reloadForSettings(changesetsOnly)
@@ -78,6 +123,7 @@ class HgChangesService(val project: Project) {
 
     fun reloadOpenDiffs() {
         project.service<HgDiffTabManager>().reloadOpenTabs()
+        inlineDiffs.values.flatten().forEach { it.reloadDiff() }
     }
 
     private fun diffProducerFor(path: String): DiffRequestProducer = object : DiffRequestProducer {

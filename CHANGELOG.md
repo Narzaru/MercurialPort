@@ -3,13 +3,30 @@
 # Mercurial Port Changelog
 
 ## [Unreleased]
+
+## [1.0.9] - 2026-10-26
 ### Changed
-- **The revision strip keeps every click.** A revision unchecked while the list was still
-  reloading no longer comes back, and the choice stays as made.
-- **The revision strip is a list now.** Rows are selected the way a list's rows are — click,
-  Shift-click, Ctrl-click, arrows — and a click on a revision's text selects its row instead of
-  switching the checkbox. The checkbox is switched by a click on the checkbox itself or by Space,
-  and the new state goes to every selected row at once.
+- **A review mark belongs to the change that was reviewed.** A mark is kept per branch and per
+  diff of the file: a file that changes after review shows unreviewed again, and editing it back
+  restores the mark. An untracked file is followed by its content. Switching to another branch
+  shows that branch's own marks, and returning brings the old ones back; the four most recently
+  used branches keep their marks. A diff that only moved because of changes merged in from
+  elsewhere keeps its mark. `Clear Reviewed` clears the current branch only. Marks made by
+  earlier versions are dropped.
+- **A folder turns gray once all its files are reviewed**, the way a file does. Files hidden by
+  the filters count too, and an unchanged `♦` file counts as reviewed.
+- **`F4` from a diff tab opens the file in the preview tab.** Going back and forth between a file
+  and its diff takes turns in a single preview tab instead of leaving the file pinned, and the
+  caret lands on the same line and column, from either side of the diff. In diffs that `F4`
+  toggles, `Show File` takes the place of `Jump to Source` on the diff toolbar, the diff in the
+  file's own tab included, where `F4` now always swaps back to the file.
+- **`Open Diff Instead of File` shows the diff in the file's own tab.** A jump made from a diff
+  opens one tab, not two, and the line jumped to is where the diff opens. `F4` swaps that tab
+  between the diff and the file and carries the line over.
+- **`Open Diff Instead of File` only answers a jump made from a diff.** `Go To Declaration` and its
+  kin take a changed file to that file's diff, while Project View, Find Usages, a stack trace or a
+  double click in the change list open the file itself. A jump inside a diff's own file stays in
+  the file as before, and a file that is already open keeps the tab it has.
 - **`+N −M` is recounted as a file is written**, without waiting for `Refresh`. Only the files
   that changed are counted, a save of many files at once costs a single `hg` run, and a file
   edited back to what the base holds turns into `♦` on its own.
@@ -17,6 +34,14 @@
   from a terminal, or an edit of a file the list does not hold yet, now reloads the list instead
   of leaving it as it was until `Refresh`. What is worth a reload is decided by Mercurial, not
   guessed from the path, so a build writing over its output leaves the window alone.
+- **The revision strip is a list now.** Rows are selected the way a list's rows are — click,
+  Shift-click, Ctrl-click, arrows — and a click on a revision's text selects its row instead of
+  switching the checkbox. The checkbox is switched by a click on the checkbox itself or by Space,
+  and the new state goes to every selected row at once.
+- **The revision strip keeps every click.** A revision unchecked while the list was still
+  reloading no longer comes back, and the choice stays as made.
+- **The change list no longer complains at shutdown.** A file change arriving while the project was
+  closing left an `Already disposed` error in the log.
 
 ## [1.0.8] - 2026-09-11
 ### Added

@@ -1,54 +1,71 @@
 package com.narzaru.mercurial.changes
 
-import com.narzaru.mercurial.diff.HgDiffTabManager
-import com.narzaru.mercurial.hg.HgPaths
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 
 class HgDiffRedirector(private val project: Project) {
 
-    fun redirect(opening: OpeningFile) {
-        val decision = DiffRedirectPolicy.decide(SignalsOf(project, opening))
-        if (decision !is DiffRedirectDecision.ShowDiff) return
-        project.service<HgChangesService>()
-            .openDiffTab(opening.file.path, decision.tabKey, null, decision.caretLine)
+    fun decisionFor(file: VirtualFile): DiffRedirectDecision {
+        val signals = SignalsOf(project, file)
+        val decision = DiffRedirectPolicy.decide(signals)
+        if (signals.redirectEnabled()) {
+            val editors = FileEditorManager.getInstance(project).getEditorList(file).size
+            LOG.info(
+                "${HgDiffRedirect.TRACE} accept file=${file.path} decision=$decision" +
+                    " ${signals.trace()} editors=$editors"
+            )
+        }
+        return decision
     }
-
-    class OpeningFile(
-        val file: VirtualFile,
-        val previousFile: VirtualFile?,
-        val restoredBySession: Boolean,
-        val caretLine: Int?
-    )
 
     private class SignalsOf(
         private val project: Project,
-        private val opening: OpeningFile
+        private val file: VirtualFile
     ) : DiffRedirectSignals {
 
-        override fun fileIsEligible(): Boolean =
-            !opening.file.isDirectory && opening.file.isInLocalFileSystem
+        private val jump: InlineDiffArming.Jump? by lazy { changes().inlineDiffArming.peek() }
 
-        override fun tabRestoredBySession(): Boolean = opening.restoredBySession
+        private val enabled: Boolean by lazy { ChangesSettings(project).openDiffInsteadOfFile }
 
-        override fun openedAsFileOnPurpose(): Boolean =
-            project.service<HgChangesService>().takeOpenedAsFile(opening.file.path)
+        private val armed: Boolean by lazy { jump != null }
 
-        override fun cameFromItsDiff(): Boolean {
-            val previous = opening.previousFile ?: return false
-            val source = project.service<HgDiffTabManager>().sourcePathOf(previous) ?: return false
-            return HgPaths.key(source) == HgPaths.key(opening.file.path)
+        private val eligible: Boolean by lazy { !file.isDirectory && file.isInLocalFileSystem }
+
+        private val openedBefore: Boolean by lazy { jump?.wasOpenBefore(file.path) == true }
+
+        private val onPurpose: Boolean by lazy { changes().peekOpenedAsFile(file.path) }
+
+        private val sameFile: Boolean by lazy {
+            DiffNavigationOrigin.cameFromItsDiff(jump?.diffSourcePath, file.path)
         }
 
-        override fun redirectEnabled(): Boolean = ChangesSettings(project).openDiffInsteadOfFile
+        private val hasDiff: Boolean by lazy { changes().hasDiff(file) }
 
-        override fun diffTabKey(): String? {
-            val changes = project.service<HgChangesService>()
-            if (!changes.hasDiff(opening.file)) return null
-            return changes.diffTabKeyOf(opening.file)
-        }
+        override fun redirectEnabled(): Boolean = enabled
 
-        override fun caretLine(): Int? = opening.caretLine
+        override fun startedFromDiff(): Boolean = armed
+
+        override fun fileIsEligible(): Boolean = eligible
+
+        override fun fileWasOpenBeforeJump(): Boolean = openedBefore
+
+        override fun openedAsFileOnPurpose(): Boolean = onPurpose
+
+        override fun cameFromItsDiff(): Boolean = sameFile
+
+        override fun fileHasDiff(): Boolean = hasDiff
+
+        fun trace(): String =
+            "enabled=$enabled armed=$armed eligible=$eligible openedBefore=$openedBefore" +
+                " onPurpose=$onPurpose sameFile=$sameFile hasDiff=$hasDiff"
+
+        private fun changes(): HgChangesService = project.service()
+    }
+
+    private companion object {
+        val LOG = Logger.getInstance(HgDiffRedirector::class.java)
     }
 }

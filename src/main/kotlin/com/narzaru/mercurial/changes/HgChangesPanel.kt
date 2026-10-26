@@ -4,6 +4,7 @@ import com.narzaru.mercurial.diff.HgDiffTabManager
 import com.narzaru.mercurial.diff.NavigationHistory
 import com.narzaru.mercurial.hg.HgCommandRunner
 import com.narzaru.mercurial.hg.HgContentCache
+import com.narzaru.mercurial.hg.HgContentHash
 import com.narzaru.mercurial.hg.HgDiffStatParser
 import com.narzaru.mercurial.hg.HgFailure
 import com.narzaru.mercurial.model.ChangesetsFragments
@@ -115,7 +116,7 @@ import javax.swing.tree.TreePath
 class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
 
     private val settings = ChangesSettings(project)
-    private val review = ReviewState(settings)
+    private val review = ReviewState(ReviewMarks(settings))
 
     private var displayMode = HgDisplayMode.UNCOMMITTED
     private var listMode = HgListMode.FILES
@@ -575,13 +576,13 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         if (toolWindow !is ToolWindowEx) return
         toolWindow.setAdditionalGearActions(
             DefaultActionGroup(
-                action("Clear Reviewed", "Drop every review mark", null) { clearReviewed() },
+                action("Clear Reviewed", "Drop the review marks of the current branch", null) { clearReviewed() },
                 Separator.getInstance(),
                 toggle("Show ± Column", "Show the added/removed lines column", null,
                     { statsVisible }) { setStatsVisible(!statsVisible) },
                 toggle(
                     "Open Diff Instead of File",
-                    "Arriving at a changed file by a navigation shows its diff instead of the file",
+                    "A navigation started in a diff lands in the diff of the changed file it reaches",
                     null,
                     { settings.openDiffInsteadOfFile }
                 ) {
@@ -872,6 +873,10 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                     if (requestId != refreshId) return@onEdt
                     comparison = ComparisonState(repoRoot, result.targetRev, mode, result.revsByFile)
                     knownRepoState = RepoState.parse(result.currentInfo)
+                    review.startLoad(
+                        knownRepoState.takeIf { it.isKnown }?.branch.orEmpty(),
+                        "${mode.name}|${result.targetRev}"
+                    )
                     baseContentCache.clear()
                     partialDiff.clear()
                     lastActivatedPath = ""
@@ -945,11 +950,13 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         updateSummary(shownFiles())
         val statJobs = ranges.ifEmpty { listOf(DiffRange(targetRev, "")) }
         val ignoreEolChanges = HgSettings.ignoreEolChanges
+        val contentPaths = DiffStatsPlan.contentHashedPaths(sourceFiles)
 
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
                 val runner = HgCommandRunner(repoRoot, trace)
                 val stats = LinkedHashMap<DiffRange, Map<String, HgDiffStat>>()
+                val countedRanges = LinkedHashMap<DiffRange, Map<String, HgDiffStat>>()
                 trace.timed("diff stats") {
                     jobs.map(statJobs) { range ->
                         val res = runner.runToBytesDetailed(
@@ -959,9 +966,15 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                             range to HgDiffStatParser.parse(res.stdout)
                         } else {
                             LOG.warn("Diff stats are unavailable: ${HgFailure.message(res.failedToStart, res.stderr)}")
-                            range to emptyMap()
+                            range to null
                         }
-                    }.forEach { (range, byPath) -> stats[range] = byPath }
+                    }.forEach { (range, byPath) ->
+                        stats[range] = byPath.orEmpty()
+                        if (byPath != null) countedRanges[range] = byPath
+                    }
+                }
+                val contentHashes = trace.timed("content hashes") {
+                    DiffStatsPlan.contentHashes(contentPaths, contentHashIn(repoRoot))
                 }
                 onEdt {
                     if (requestId != statsRequestId) return@onEdt
@@ -970,6 +983,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                         val counted = DiffStatsPlan.applyStats(sourceFiles, stats, targetRev)
                         sourceFiles.clear()
                         sourceFiles.addAll(counted)
+                        review.learn(DiffStatsPlan.diffHashes(counted, countedRanges, targetRev, contentHashes))
                         publishStatuses()
                     }
                     if (listMode == HgListMode.FILES) {
@@ -983,6 +997,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                 onEdt {
                     if (requestId == statsRequestId && statsPending) {
                         statsPending = false
+                        review.learn(emptyMap())
                         updateSummary(shownFiles())
                     }
                     if (requestId == statsRequestId) flushPendingStatsKeys()
@@ -1004,8 +1019,14 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         val targetRev = comparison.baseRev
         when (val action = PartialStatsPlan.of(comparison.mode, targetRev, sourceFiles, batch)) {
             PartialStatsAction.Skip -> return
-            PartialStatsAction.CountAll -> loadDiffStats(repoRoot, targetRev, statsRanges, statsPaths)
-            is PartialStatsAction.Count -> countChangedFiles(repoRoot, targetRev, action)
+            PartialStatsAction.CountAll -> {
+                review.suspend(sourceFiles.map { review.key(it) })
+                loadDiffStats(repoRoot, targetRev, statsRanges, statsPaths)
+            }
+            is PartialStatsAction.Count -> {
+                review.suspend(action.keys)
+                countChangedFiles(repoRoot, targetRev, action)
+            }
         }
     }
 
@@ -1017,22 +1038,31 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
         ApplicationManager.getApplication().executeOnPooledThread {
             var byPath: Map<String, HgDiffStat>? = null
+            var contentHashes: Map<String, String> = emptyMap()
             try {
-                val res = HgCommandRunner(repoRoot).runToBytesDetailed(
-                    DiffStatsPlan.arguments(action.range, action.paths, ignoreEolChanges)
-                )
-                if (res.exitCode == 0) {
-                    byPath = HgDiffStatParser.parse(res.stdout)
+                if (action.needsDiff) {
+                    val res = HgCommandRunner(repoRoot).runToBytesDetailed(
+                        DiffStatsPlan.arguments(action.range, action.paths, ignoreEolChanges)
+                    )
+                    if (res.exitCode == 0) {
+                        byPath = HgDiffStatParser.parse(res.stdout)
+                    } else {
+                        LOG.warn("Diff stats are unavailable: ${HgFailure.message(res.failedToStart, res.stderr)}")
+                    }
                 } else {
-                    LOG.warn("Diff stats are unavailable: ${HgFailure.message(res.failedToStart, res.stderr)}")
+                    byPath = emptyMap()
                 }
+                contentHashes = DiffStatsPlan.contentHashes(action.contentPaths, contentHashIn(repoRoot))
             } finally {
                 val stats = byPath
+                val hashes = contentHashes
                 onEdt {
                     partialStatsRunning = false
                     val current = refreshStamp == refreshId && statsStamp == statsRequestId
                     if (stats != null && current) {
-                        applyPartialStats(mapOf(action.range to stats), targetRev, action.keys)
+                        applyPartialStats(mapOf(action.range to stats), hashes, targetRev, action.keys)
+                    } else if (current && review.learn(hashes)) {
+                        renderReviewMarks()
                     }
                     flushPendingStatsKeys()
                 }
@@ -1040,14 +1070,22 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         }
     }
 
+    private fun contentHashIn(repoRoot: File): (String) -> String? = { path -> HgContentHash.ofFile(File(repoRoot, path)) }
+
     private fun applyPartialStats(
         stats: Map<DiffRange, Map<String, HgDiffStat>>,
+        contentHashes: Map<String, String>,
         targetRev: String,
         keys: Set<String>
     ) {
         val counted = DiffStatsPlan.applyStatsToKeys(sourceFiles, stats, targetRev, keys)
+        val recountedFiles = counted.filter { review.key(it) in keys }
+        val marksMoved = review.learn(DiffStatsPlan.diffHashes(recountedFiles, stats, targetRev, contentHashes))
         val recounted = counted.filterIndexed { index, item -> item != sourceFiles[index] }
-        if (recounted.isEmpty()) return
+        if (recounted.isEmpty()) {
+            if (marksMoved) renderReviewMarks()
+            return
+        }
         sourceFiles.clear()
         sourceFiles.addAll(counted)
         republishStatuses(recounted)
@@ -1072,10 +1110,11 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         project.service<HgFileStatusService>().merge(repoRoot, items)
     }
 
+    private fun listedFiles(): List<HgFileItem> = if (listMode == HgListMode.TODO) currentTodoItems else sourceFiles
+
     private fun shownFiles(): List<HgFileItem> {
         val filter = PathFilter(filterField.text.orEmpty(), excludeField.text.orEmpty())
-        return (if (listMode == HgListMode.TODO) currentTodoItems else sourceFiles)
-            .filter { (showUnchanged || !it.isUnchanged) && filter.accepts(it.path) }
+        return listedFiles().filter { (showUnchanged || !it.isUnchanged) && filter.accepts(it.path) }
     }
 
     private fun renderReviewMarks() = renderFiltered(reuseTree = true)
@@ -1085,7 +1124,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         if (reuseTree && TreeRefreshPlan.keepsStructure(renderedFiles, items)) {
             renderedFiles = items
             trace.timed("refresh tree") {
-                ChangesTreeBuilder.refresh(renderedRoot, items, review::isReviewed)
+                ChangesTreeBuilder.refresh(renderedRoot, items, listedFiles(), review::isReviewed)
                 tree.repaint()
                 updateSummary(items)
             }
@@ -1093,7 +1132,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         }
         val selected = selectedFileKeys()
         val collapsed = collapsedDirs()
-        val newRoot = trace.timed("build tree") { ChangesTreeBuilder.build(items, review::isReviewed) }
+        val newRoot = trace.timed("build tree") { ChangesTreeBuilder.build(items, listedFiles(), review::isReviewed) }
         trace.timed("show tree") {
             renderedFiles = items
             renderedRoot = newRoot
@@ -1204,6 +1243,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     }
 
     private fun scheduleFileChangeReaction(delayMs: Int = FILE_CHANGE_DELAY_MS) {
+        if (fileChangeAlarm.isDisposed) return
         fileChangeAlarm.cancelAllRequests()
         fileChangeAlarm.addRequest({ reactToChangedFiles() }, delayMs)
     }

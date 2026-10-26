@@ -102,7 +102,7 @@ data class HgFileItem(
         get() = if (isTodoItem) "${File(path).name}:$lineNumber" else path
 }
 
-data class HgDiffStat(val added: Int, val removed: Int)
+data class HgDiffStat(val added: Int, val removed: Int, val hash: String = "")
 
 data class HgHistoryItem(
     val revision: String,

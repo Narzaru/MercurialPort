@@ -106,7 +106,13 @@ class ChangesNodeRenderer(
                 } else {
                     " · ${payload.reviewedCount}/${payload.fileCount}"
                 }
-                append(fit(payload.name, tree, node, suffix), SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
+                append(
+                    fit(payload.name, tree, node, suffix),
+                    when {
+                        payload.allReviewed -> SimpleTextAttributes.GRAYED_ATTRIBUTES
+                        else -> SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES
+                    }
+                )
                 append(suffix, SimpleTextAttributes.GRAYED_ATTRIBUTES)
             }
             is FileNode -> {

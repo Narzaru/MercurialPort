@@ -239,6 +239,151 @@ class HgDiffStatParserTest {
         assertTrue(parse("").isEmpty())
     }
 
+    private fun hashOf(diff: String, path: String = "a.kt") = parse(diff.trimIndent()).getValue(path).hash
+
+    @Test
+    fun `a file gets a short hex hash`() {
+        val hash = hashOf("diff --git a/a.kt b/a.kt\n@@ -1 +1 @@\n-old\n+new")
+
+        assertEquals(HgDiffStatParser.HASH_LENGTH, hash.length)
+        assertTrue(hash.all { it in "0123456789abcdef" })
+    }
+
+    @Test
+    fun `the hash ignores hunk positions and context`() {
+        val before = hashOf(
+            """
+            diff --git a/a.kt b/a.kt
+            --- a/a.kt
+            +++ b/a.kt
+            @@ -10,3 +10,3 @@ fun first()
+             context
+            -old
+            +new
+            """
+        )
+        val shifted = hashOf(
+            """
+            diff --git a/a.kt b/a.kt
+            --- a/a.kt
+            +++ b/a.kt
+            @@ -42,4 +42,4 @@ fun other()
+             other context
+             more context
+            -old
+            +new
+            """
+        )
+
+        assertEquals(before, shifted)
+    }
+
+    @Test
+    fun `the hash follows the changed lines`() {
+        val one = hashOf("diff --git a/a.kt b/a.kt\n@@ -1 +1 @@\n-old\n+new")
+        val other = hashOf("diff --git a/a.kt b/a.kt\n@@ -1 +1 @@\n-old\n+newer")
+        val swapped = hashOf("diff --git a/a.kt b/a.kt\n@@ -1 +1 @@\n+old\n-new")
+
+        assertTrue(one != other)
+        assertTrue(one != swapped)
+    }
+
+    @Test
+    fun `the hash ignores the header paths of the same file`() {
+        val one = hashOf("diff --git a/a.kt b/a.kt\n--- a/a.kt\n+++ b/a.kt\n@@ -1 +1 @@\n+x")
+        val other = hashOf("diff --git a/a.kt b/a.kt\n--- a/a.kt\t2020\n+++ b/a.kt\t2021\n@@ -1 +1 @@\n+x")
+
+        assertEquals(one, other)
+    }
+
+    @Test
+    fun `a missing newline at the end changes the hash`() {
+        val plain = hashOf("diff --git a/a.kt b/a.kt\n@@ -1 +1 @@\n+x")
+        val noNewLine = hashOf("diff --git a/a.kt b/a.kt\n@@ -1 +1 @@\n+x\n\\ No newline at end of file")
+
+        assertTrue(plain != noNewLine)
+    }
+
+    @Test
+    fun `a line ending change changes the hash`() {
+        val crlf = parse("diff --git a/a.kt b/a.kt\n@@ -1 +1 @@\n-x\n+x\r\n").getValue("a.kt").hash
+        val lf = parse("diff --git a/a.kt b/a.kt\n@@ -1 +1 @@\n-x\n+x\n").getValue("a.kt").hash
+
+        assertTrue(crlf != lf)
+    }
+
+    @Test
+    fun `the rename source is part of the hash`() {
+        val fromOne = hashOf(
+            """
+            diff --git a/one.kt b/a.kt
+            rename from one.kt
+            rename to a.kt
+            """
+        )
+        val fromTwo = hashOf(
+            """
+            diff --git a/two.kt b/a.kt
+            rename from two.kt
+            rename to a.kt
+            """
+        )
+
+        assertTrue(fromOne != fromTwo)
+    }
+
+    @Test
+    fun `a mode change is part of the hash`() {
+        val content = "@@ -1 +1 @@\n+x"
+        val plain = hashOf("diff --git a/a.kt b/a.kt\n$content")
+        val executable = hashOf("diff --git a/a.kt b/a.kt\nold mode 100644\nnew mode 100755\n$content")
+
+        assertTrue(plain != executable)
+    }
+
+    @Test
+    fun `a text index line does not enter the hash`() {
+        val plain = hashOf("diff --git a/a.kt b/a.kt\n@@ -1 +1 @@\n+x")
+        val indexed = hashOf("diff --git a/a.kt b/a.kt\nindex 1111111..2222222 100644\n@@ -1 +1 @@\n+x")
+
+        assertEquals(plain, indexed)
+    }
+
+    @Test
+    fun `a binary file is told apart by its index line`() {
+        val one = hashOf(
+            "diff --git a/a.png b/a.png\nindex 1111111..2222222\nGIT binary patch\nliteral 1\nAAAA",
+            "a.png"
+        )
+        val sameBlobs = hashOf(
+            "diff --git a/a.png b/a.png\nindex 1111111..2222222\nGIT binary patch\nliteral 1\nBBBB",
+            "a.png"
+        )
+        val otherBlobs = hashOf(
+            "diff --git a/a.png b/a.png\nindex 1111111..3333333\nGIT binary patch\nliteral 1\nAAAA",
+            "a.png"
+        )
+
+        assertEquals(one, sameBlobs)
+        assertTrue(one != otherBlobs)
+    }
+
+    @Test
+    fun `a binary file without an index line is told apart by its patch`() {
+        val one = hashOf("diff --git a/a.png b/a.png\nGIT binary patch\nliteral 1\nAAAA", "a.png")
+        val other = hashOf("diff --git a/a.png b/a.png\nGIT binary patch\nliteral 1\nBBBB", "a.png")
+
+        assertTrue(one != other)
+    }
+
+    @Test
+    fun `hashes are kept per file`() {
+        val stats = parse("diff --git a/a.kt b/a.kt\n+x\ndiff --git a/b.kt b/b.kt\n+x\ndiff --git a/c.kt b/c.kt\n+y")
+
+        assertEquals(stats.getValue("a.kt").hash, stats.getValue("b.kt").hash)
+        assertTrue(stats.getValue("a.kt").hash != stats.getValue("c.kt").hash)
+    }
+
     @Test
     fun `a non-ASCII path is decoded`() {
         val stats = parse("diff --git a/Модуль/файл.kt b/Модуль/файл.kt\n+x")

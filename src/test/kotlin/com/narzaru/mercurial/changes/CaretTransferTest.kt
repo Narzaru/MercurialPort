@@ -22,28 +22,38 @@ class CaretTransferTest {
     }
 
     @Test
-    fun `a caret on the right side of the diff lands in the file`() {
-        assertEquals(7, CaretTransfer.toFile(DiffSide.RIGHT, 7))
+    fun `a caret on a side showing the file itself keeps its line`() {
+        assertEquals(7, CaretTransfer.toFile(7, true) { error("must not translate") })
     }
 
     @Test
-    fun `the first line of the right side is carried to the file`() {
-        assertEquals(0, CaretTransfer.toFile(DiffSide.RIGHT, 0))
+    fun `the first line of a side showing the file is carried to the file`() {
+        assertEquals(0, CaretTransfer.toFile(0, true) { error("must not translate") })
     }
 
     @Test
-    fun `a caret on the left side has no line in the file`() {
-        assertNull(CaretTransfer.toFile(DiffSide.LEFT, 7))
+    fun `a caret on a side showing a revision is translated into the file`() {
+        assertEquals(12, CaretTransfer.toFile(7, false) { it + 5 })
+    }
+
+    @Test
+    fun `a revision line that cannot be translated keeps its own number`() {
+        assertEquals(7, CaretTransfer.toFile(7, false) { null })
+    }
+
+    @Test
+    fun `a translation outside the file keeps the revision line`() {
+        assertEquals(7, CaretTransfer.toFile(7, false) { -1 })
     }
 
     @Test
     fun `a missing caret in the diff has no line in the file`() {
-        assertNull(CaretTransfer.toFile(DiffSide.RIGHT, null))
+        assertNull(CaretTransfer.toFile(null, true) { it })
     }
 
     @Test
     fun `a line that could not be mapped has no line in the file`() {
-        assertNull(CaretTransfer.toFile(DiffSide.RIGHT, -1))
+        assertNull(CaretTransfer.toFile(-1, false) { it })
     }
 
     @Test

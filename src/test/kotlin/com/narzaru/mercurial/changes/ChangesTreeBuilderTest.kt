@@ -2,6 +2,7 @@ package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.model.HgFileItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -98,6 +99,59 @@ class ChangesTreeBuilderTest {
         val src = root.children.single().dir
         assertEquals(2, src.fileCount)
         assertEquals(1, src.reviewedCount)
+    }
+
+    @Test
+    fun `a directory with every file reviewed is all reviewed`() {
+        val root = build(listOf(file("src/a.kt"), file("src/b.kt")), reviewed = setOf("src/a.kt", "src/b.kt"))
+
+        assertTrue(root.children.single().dir.allReviewed)
+    }
+
+    @Test
+    fun `a directory with an unreviewed file is not all reviewed`() {
+        val root = build(listOf(file("src/a.kt"), file("src/b.kt")), reviewed = setOf("src/a.kt"))
+
+        assertFalse(root.children.single().dir.allReviewed)
+    }
+
+    @Test
+    fun `a directory is not all reviewed while a hidden file of it is unreviewed`() {
+        val shown = listOf(file("src/a.kt"))
+        val root = ChangesTreeBuilder.build(shown, shown + file("src/hidden.kt")) { it.path == "src/a.kt" }
+
+        assertFalse(root.children.single().dir.allReviewed)
+    }
+
+    @Test
+    fun `a collapsed chain looks only at the files under its deepest directory`() {
+        val shown = listOf(file("a/b/c/x.kt"))
+        val root = ChangesTreeBuilder.build(shown, shown + file("a/b/hidden.kt")) { it.path == "a/b/c/x.kt" }
+
+        val chain = root.children.single().dir
+        assertEquals("a/b/c", chain.name)
+        assertTrue(chain.allReviewed)
+    }
+
+    @Test
+    fun `a nested directory is checked by its full path`() {
+        val root = build(listOf(file("a/b/one.kt"), file("a/c/two.kt")), reviewed = setOf("a/b/one.kt"))
+
+        val a = root.children.single()
+        assertFalse(a.dir.allReviewed)
+        assertTrue(a.children.first().dir.allReviewed)
+        assertFalse(a.children.last().dir.allReviewed)
+    }
+
+    @Test
+    fun `refresh recomputes whether a directory is all reviewed`() {
+        val items = listOf(file("src/a.kt"))
+        val root = build(items)
+        assertFalse(root.children.single().dir.allReviewed)
+
+        ChangesTreeBuilder.refresh(root, items) { true }
+
+        assertTrue(root.children.single().dir.allReviewed)
     }
 
     @Test
