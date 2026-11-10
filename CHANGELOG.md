@@ -3,6 +3,8 @@
 # Mercurial Port Changelog
 
 ## [Unreleased]
+
+## [1.1.0] - 2026-11-10
 ### Added
 - **A limit on branch size for `Base` and `Changesets`.** A branch with more revisions than the
   limit set in the settings, 100 by default, is not loaded in these modes; `Uncommitted` and
