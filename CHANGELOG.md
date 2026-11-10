@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 ### Changed
+- **The branch field in Hg Changes lists the repository's active branches**, those neither closed
+  nor merged; any branch or revision can still be typed.
+- **Editing the branch name reloads the list** shortly after typing stops, or at once on `Enter` or
+  when a branch is picked from the list.
 - **`hg` runs with `HGPLAIN`.** Colour, `noprefix`, aliases, `[defaults]` and translated messages
   in the user's hgrc no longer change the output the plugin reads.
 - **A canceled or timed-out `hg` call is reported as such.** A command server that times out is no

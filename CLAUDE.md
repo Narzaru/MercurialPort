@@ -67,6 +67,8 @@
 - состояние окна изменений — `PathFilter`, `ChangesSettings`, `StatusTextFormatter`, `BranchScope`,
   `BranchRevisions`, revset выбранных ревизий — `SelectionRevsets`, выбор строки открытого файла —
   `OpenedFileRow`, ключи файлов — `FileKeys`, LRU хранимого — `RecentKeys`, `RevisionOverrides`;
+- поле ветки — `BranchReloadPlan` (когда перезагружать при вводе), `BranchChoices` (когда заново
+  спрашивать список), `HgActiveBranches` (разбор `hg branches`);
 - реакция на изменения файлов — `FileChangeCoordinator` (события → команды, панель их исполняет);
   пересчёт ± — `StatsScheduler` (что и когда считать) и `DiffStatsLoader` (запуск `hg diff`);
 - пул command server — `HgServerPool` (очередь ожидания по приходу, аренда, остановка),

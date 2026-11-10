@@ -132,6 +132,28 @@ class FileChangeCoordinatorTest {
     }
 
     @Test
+    fun `a stale repo state probe leaves the current probe running`() {
+        coordinator.loaded(RepoState("default", "aaa"))
+        val stale = coordinator.react(repoState, idle).filterIsInstance<ProbeRepoState>().single()
+        coordinator.reset()
+        val current = coordinator.react(repoState, idle).filterIsInstance<ProbeRepoState>().single()
+
+        assertEquals(emptyList<FileChangeCommand>(), coordinator.repoStateProbed(stale, RepoState("default", "bbb"), false))
+        assertEquals(listOf(Recount(emptyList()), RetryLater), coordinator.react(repoState, idle))
+        assertEquals(listOf(Refresh), coordinator.repoStateProbed(current, RepoState("default", "bbb"), false))
+    }
+
+    @Test
+    fun `a finished repo state probe lets the next one start`() {
+        val probe = coordinator.react(repoState, idle).filterIsInstance<ProbeRepoState>().single()
+        coordinator.repoStateProbed(probe, RepoState.UNKNOWN, false)
+
+        val next = coordinator.react(repoState, idle).filterIsInstance<ProbeRepoState>().single()
+
+        assertTrue(next.stamp != probe.stamp)
+    }
+
+    @Test
     fun `a probe that moves the working directory while busy defers the refresh`() {
         coordinator.loaded(RepoState("default", "aaa"))
         val probe = coordinator.react(repoState, idle).filterIsInstance<ProbeRepoState>().single()
@@ -196,6 +218,19 @@ class FileChangeCoordinatorTest {
         coordinator.reset()
 
         assertEquals(emptyList<FileChangeCommand>(), coordinator.unlistedAnswered(first, UnlistedAnswer.Listable, idle))
+    }
+
+    @Test
+    fun `a stale answer leaves the current question running`() {
+        val stale = ask(unlisted("obj/a"))
+        coordinator.reset()
+        val current = ask(unlisted("obj/b"))
+
+        assertEquals(emptyList<FileChangeCommand>(), coordinator.unlistedAnswered(stale, UnlistedAnswer.Quiet, idle))
+        assertEquals(listOf(Recount(emptyList()), RetryLater), coordinator.react(unlisted("obj/c"), idle))
+
+        val next = coordinator.unlistedAnswered(current, UnlistedAnswer.Quiet, idle)
+        assertEquals(listOf("obj/c"), next.filterIsInstance<AskUnlisted>().single().keys)
     }
 
     @Test

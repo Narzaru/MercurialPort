@@ -38,11 +38,11 @@ class FileChangeCoordinator {
 
     private var repoStateProbePending = false
 
-    private var repoStateRunning = false
+    private var lastRunId = 0
 
-    private var probeRunning = false
+    private var repoStateRun: Int? = null
 
-    private var probeId = 0
+    private var unlistedRun: Int? = null
 
     private var knownRepoState = RepoState.UNKNOWN
 
@@ -73,9 +73,8 @@ class FileChangeCoordinator {
     }
 
     fun reset() {
-        probeId++
-        probeRunning = false
-        repoStateRunning = false
+        repoStateRun = null
+        unlistedRun = null
         repoStateProbePending = false
         refreshPending = false
         todoRescanPending = false
@@ -115,8 +114,9 @@ class FileChangeCoordinator {
         busy: Boolean
     ): List<FileChangeCommand> {
         val out = ArrayList<FileChangeCommand>()
-        repoStateRunning = false
-        if (probe.stamp != probeId || !state.isKnown) return out
+        if (probe.stamp != repoStateRun) return out
+        repoStateRun = null
+        if (!state.isKnown) return out
         val moved = RepoState.changed(knownRepoState, state)
         knownRepoState = state
         if (moved) requestRefresh(busy, out)
@@ -129,8 +129,8 @@ class FileChangeCoordinator {
         conditions: PanelConditions
     ): List<FileChangeCommand> {
         val out = ArrayList<FileChangeCommand>()
-        probeRunning = false
-        if (ask.stamp != probeId) return out
+        if (ask.stamp != unlistedRun) return out
+        unlistedRun = null
         when (answer) {
             is UnlistedAnswer.Failed -> {
                 out.add(FileChangeCommand.ReportUnchecked(answer.details))
@@ -161,14 +161,15 @@ class FileChangeCoordinator {
     }
 
     private fun probeRepoState(conditions: PanelConditions, out: MutableList<FileChangeCommand>) {
-        if (!repoStateProbePending || repoStateRunning || conditions.busy || !conditions.hasRepo) return
+        if (!repoStateProbePending || repoStateRun != null || conditions.busy || !conditions.hasRepo) return
         repoStateProbePending = false
-        repoStateRunning = true
-        out.add(FileChangeCommand.ProbeRepoState(probeId))
+        val run = ++lastRunId
+        repoStateRun = run
+        out.add(FileChangeCommand.ProbeRepoState(run))
     }
 
     private fun probeUnlistedPaths(conditions: PanelConditions, out: MutableList<FileChangeCommand>) {
-        if (probeRunning || conditions.busy || pendingUnlistedKeys.isEmpty() || !conditions.hasRepo) return
+        if (unlistedRun != null || conditions.busy || pendingUnlistedKeys.isEmpty() || !conditions.hasRepo) return
         when (val action = UnlistedPathsProbe.of(pendingUnlistedKeys, quietKeys)) {
             UnlistedPathsAction.Ignore -> pendingUnlistedKeys.clear()
             UnlistedPathsAction.Reload -> {
@@ -177,8 +178,9 @@ class FileChangeCoordinator {
             }
             is UnlistedPathsAction.Ask -> {
                 pendingUnlistedKeys.removeAll(action.keys.toSet())
-                probeRunning = true
-                out.add(FileChangeCommand.AskUnlisted(action.keys, probeId))
+                val run = ++lastRunId
+                unlistedRun = run
+                out.add(FileChangeCommand.AskUnlisted(action.keys, run))
             }
         }
     }
