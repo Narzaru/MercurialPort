@@ -109,8 +109,6 @@ object BranchRevisions {
 
     fun revset(nodes: Collection<String>): String = nodes.joinToString("+")
 
-    fun baseRevset(nodes: Collection<String>): String = "p1(min(${revset(nodes)}))"
-
     fun mergeBaseRevset(parentBranch: String): String =
         "max(ancestors(.) and branch('${parentBranch.replace("\\", "\\\\").replace("'", "\\'")}'))"
 

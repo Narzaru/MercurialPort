@@ -33,8 +33,6 @@ class HgChangesService(val project: Project) {
         panel?.reloadForSettings(changesetsOnly)
     }
 
-    fun hasDiff(file: VirtualFile): Boolean = panel?.hasDiffFor(file) == true
-
     fun diffTabKeyOf(file: VirtualFile): String? = panel?.diffTabKeyOf(file)
 
     fun changesLoaded(): Boolean = panel?.isLoaded() == true

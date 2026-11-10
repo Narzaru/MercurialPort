@@ -89,7 +89,7 @@ class ChangesLoader(
             return ChangesResult.failure(text, ".", branch, revisions, selection)
         }
 
-        val targetRev = earlyTargetRev ?: BranchRevisions.baseRevset(selectedNodes)
+        val targetRev = earlyTargetRev ?: SelectionRevsets.base(revisions, selection)
 
         val currentInfo = head.currentInfo
         val baseInfo = head.baseInfo
@@ -107,7 +107,7 @@ class ChangesLoader(
         }
 
         val scope = if (mode == HgDisplayMode.BRANCH) {
-            trace.timed("branch own files") { branchOwnFiles(selectedNodes) }
+            trace.timed("branch own files") { branchOwnFiles(SelectionRevsets.selected(revisions, selection)) }
         } else {
             null
         }
@@ -144,9 +144,10 @@ class ChangesLoader(
         selection: RevisionSelection,
         trace: LoadTrace? = null
     ): ChangesResult {
+        val selectedRevset = SelectionRevsets.selected(revisions, selection)
         val log = trace.timed("changeset log") {
             commands.run(
-                "log", "-r", BranchRevisions.revset(selectedNodes),
+                "log", "-r", selectedRevset,
                 "--template", BranchRevisions.FILES_TEMPLATE
             )
         }
@@ -154,10 +155,13 @@ class ChangesLoader(
             return ChangesResult.failure(HgFailure.message(log), targetRev, branch, revisions, selection)
         }
 
-        val ownFiles = trace.timed("parse changeset log") { BranchRevisions.parseFileTouches(log.stdout) }
+        val selectedSet = selectedNodes.toHashSet()
+        val ownFiles = trace.timed("parse changeset log") {
+            BranchRevisions.parseFileTouches(log.stdout).filterKeys { it in selectedSet }
+        }
         val listed = ownFiles.values.flatMapTo(HashSet()) { paths -> paths.map { HgPaths.key(it) } }
         val touches = LinkedHashMap(ownFiles)
-        val merges = revisions.filter { it.isMerge && it.node in selectedNodes }
+        val merges = revisions.filter { it.isMerge && it.node in selectedSet }
         trace.timed("merge touches") {
             jobs.map(merges) { merge -> merge.node to mergeTouches(merge.node) }
                 .forEach { (node, paths) -> if (paths != null) touches[node] = paths }
@@ -165,7 +169,7 @@ class ChangesLoader(
 
         val statusCache = HashMap<DiffRange, List<HgFileItem>>()
         var ranges = trace.timed("file ranges") { BranchRevisions.fileRanges(selectedNodes, touches, listed) }
-        prefetchSingleRevisions(ranges, revisions, statusCache, trace)
+        prefetchSingleRevisions(ranges, revisions, selectedRevset, selectedNodes, statusCache, trace)
         fun rangeFailure(failure: HgResult) = ChangesResult.failure(
             StatusTextFormatter.statusError(HgDisplayMode.CHANGESETS, failure), targetRev, branch, revisions, selection
         )
@@ -239,6 +243,8 @@ class ChangesLoader(
     private fun prefetchSingleRevisions(
         ranges: Map<String, FileRange>,
         revisions: List<HgRevision>,
+        selectedRevset: String,
+        selectedNodes: List<String>,
         cache: MutableMap<DiffRange, List<HgFileItem>>,
         trace: LoadTrace? = null
     ) {
@@ -246,10 +252,9 @@ class ChangesLoader(
         val singles = ChangesetFiles.singleRevisionRanges(ranges, merges)
         if (singles.size < ChangesetFiles.MIN_NODES) return
 
+        val revset = SelectionRevsets.subset(selectedRevset, selectedNodes, singles.keys)
         val log = trace.timed("prefetch single revisions") {
-            commands.run(
-                "log", "-r", BranchRevisions.revset(singles.keys), "--template", ChangesetFiles.TEMPLATE
-            )
+            commands.run("log", "-r", revset, "--template", ChangesetFiles.TEMPLATE)
         }
         if (!log.success) {
             warn("Changeset files are read one by one: ${HgFailure.message(log)}")
@@ -326,9 +331,9 @@ class ChangesLoader(
     private fun inScope(item: HgFileItem, scope: Set<String>): Boolean =
         item.names.any { HgPaths.key(it) in scope }
 
-    private fun branchOwnFiles(selectedNodes: List<String>): Set<String>? {
+    private fun branchOwnFiles(selectedRevset: String): Set<String>? {
         val r = commands.run(
-            "log", "-r", BranchRevisions.revset(selectedNodes), "--template", "{join(files, '\\n')}\\n"
+            "log", "-r", selectedRevset, "--template", "{join(files, '\\n')}\\n"
         )
         if (!r.success) return null
         return BranchScope.ownFiles(r.stdout)

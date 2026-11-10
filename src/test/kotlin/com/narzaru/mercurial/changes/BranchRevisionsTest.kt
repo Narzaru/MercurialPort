@@ -72,15 +72,10 @@ class BranchRevisionsTest {
 
     @Test
     fun `base is the first parent of the oldest selected revision`() {
+        assertEquals("p1(d1d82b2)", SelectionRevsets.base(revisions, RevisionSelection.DEFAULT))
         assertEquals(
-            "p1(min(d1d82b2+97fbf27+702a733))",
-            BranchRevisions.baseRevset(RevisionSelection.DEFAULT.selectedNodes(revisions))
-        )
-        assertEquals(
-            "p1(min(97fbf27+702a733))",
-            BranchRevisions.baseRevset(
-                RevisionSelection.DEFAULT.with(revisions[0], false).selectedNodes(revisions)
-            )
+            "p1(97fbf27)",
+            SelectionRevsets.base(revisions, RevisionSelection.DEFAULT.with(revisions[0], false))
         )
     }
 

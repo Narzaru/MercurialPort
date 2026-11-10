@@ -10,6 +10,13 @@
   longer retried as a separate process, and a canceled call starts no `hg` at all.
 - **Clearing the encoding in the settings means the system encoding**, and an unknown encoding is
   rejected before any other setting is saved.
+- **Commands waiting for a busy command server are served in arrival order** and start as soon as
+  a server frees up. A command interrupted while its server starts runs no `hg`, and closing the
+  project leaves no server behind.
+- **`Base` and `Changesets` modes pass the selected revisions as a short revset**, so a branch with
+  thousands of revisions no longer fails to start `hg`.
+- **Review marks are kept for the last 1000 files marked on each branch**, and the manual revision
+  selection for the 8 most recently used branches, instead of piling up in the project's workspace.
 
 ### Fixed
 - **`Changesets` mode** keeps the files of a changeset that touches a path starting with `@`, no

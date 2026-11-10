@@ -19,7 +19,7 @@ class ChangesLoaderTest {
     private val revisionsLog = "11|n1|-1|Bob|2024-01-01 10:00 +0000|First\n" +
         "12|n2|-1|Bob|2024-01-02 10:00 +0000|Second"
 
-    private val branchPoint = "p1(min(n1+n2))"
+    private val branchPoint = "p1(n1)"
 
     private fun baseRevision(rev: String) = listOf("log", "-r", rev, "--template", revisionTemplate)
 
@@ -89,7 +89,7 @@ class ChangesLoaderTest {
                 branchRevisions to ok(revisionsLog),
                 currentRevision to ok("feature|abc123|Work in progress"),
                 baseRevision(branchPoint) to ok("default|def456|Parent work"),
-                listOf("log", "-r", "n1+n2", "--template", "{join(files, '\\n')}\\n") to ok("src/A.kt"),
+                listOf("log", "-r", SelectionRevsets.OWN_COMMITS,"--template", "{join(files, '\\n')}\\n") to ok("src/A.kt"),
                 status(branchPoint) to ok("M src/A.kt\nM src/Other.kt")
             )
         )
@@ -101,7 +101,7 @@ class ChangesLoaderTest {
                 branchRevisions,
                 currentRevision,
                 baseRevision(branchPoint),
-                listOf("log", "-r", "n1+n2", "--template", "{join(files, '\\n')}\\n"),
+                listOf("log", "-r", SelectionRevsets.OWN_COMMITS,"--template", "{join(files, '\\n')}\\n"),
                 status(branchPoint)
             ),
             hg.calls
@@ -120,7 +120,7 @@ class ChangesLoaderTest {
                 branchRevisions to ok(revisionsLog),
                 currentRevision to ok("feature|abc123|Work in progress"),
                 baseRevision(branchPoint) to ok("default|def456|Parent work"),
-                listOf("log", "-r", "n1+n2", "--template", "{join(files, '\\n')}\\n") to ok("\n\n"),
+                listOf("log", "-r", SelectionRevsets.OWN_COMMITS,"--template", "{join(files, '\\n')}\\n") to ok("\n\n"),
                 status(branchPoint) to ok("M src/Merged.kt\nA src/AlsoMerged.kt")
             )
         )
@@ -138,7 +138,7 @@ class ChangesLoaderTest {
                 branchRevisions to ok(revisionsLog),
                 currentRevision to ok("feature|abc123|Work in progress"),
                 baseRevision(branchPoint) to ok("default|def456|Parent work"),
-                listOf("log", "-r", "n1+n2", "--template", "{join(files, '\\n')}\\n") to failed("abort: boom"),
+                listOf("log", "-r", SelectionRevsets.OWN_COMMITS,"--template", "{join(files, '\\n')}\\n") to failed("abort: boom"),
                 status(branchPoint) to ok("M src/Merged.kt")
             )
         )
@@ -150,7 +150,7 @@ class ChangesLoaderTest {
 
     @Test
     fun `an unselected revision is left out of the compared range`() {
-        val onlySecond = "p1(min(n2))"
+        val onlySecond = "p1(n2)"
         val asked = ArrayList<String>()
         val hg = FakeHg(
             mapOf(
@@ -158,7 +158,9 @@ class ChangesLoaderTest {
                 branchRevisions to ok(revisionsLog),
                 currentRevision to ok("feature|abc123|Work in progress"),
                 baseRevision(onlySecond) to ok("default|def456|Parent work"),
-                listOf("log", "-r", "n2", "--template", "{join(files, '\\n')}\\n") to ok("src/A.kt"),
+                listOf(
+                    "log", "-r", "(${SelectionRevsets.OWN_COMMITS}) - (n1)", "--template", "{join(files, '\\n')}\\n"
+                ) to ok("src/A.kt"),
                 status(onlySecond) to ok("M src/A.kt")
             )
         )
@@ -181,7 +183,7 @@ class ChangesLoaderTest {
                 branchRevisions to ok(revisionsLog),
                 currentRevision to ok("feature|abc123|Work in progress"),
                 baseRevision(branchPoint) to ok("default|def456|Parent work"),
-                listOf("log", "-r", "n1+n2", "--template", "{join(files, '\\n')}\\n") to ok("src/A.kt"),
+                listOf("log", "-r", SelectionRevsets.OWN_COMMITS,"--template", "{join(files, '\\n')}\\n") to ok("src/A.kt"),
                 status(branchPoint) to ok("M src/A.kt")
             )
         )
@@ -423,11 +425,74 @@ class ChangesLoaderTest {
         assertEquals(branchPoint, result.targetRev)
     }
 
+    private val longLog = (1..30).joinToString("\n") { "$it|node$it|-1|Bob|2024-01-01 10:00 +0000|Work $it" }
+
+    @Test
+    fun `the base mode of a long branch names its revisions by a revset`() {
+        val ownFiles = listOf("log", "-r", SelectionRevsets.OWN_COMMITS, "--template", "{join(files, '\\n')}\\n")
+        val hg = FakeHg(
+            mapOf(
+                currentBranch to ok("default"),
+                branchRevisions to ok(longLog),
+                currentRevision to ok("default|abc123|Work 30"),
+                baseRevision("p1(node1)") to ok("|000000|"),
+                ownFiles to ok("src/A.kt"),
+                status("p1(node1)") to ok("M src/A.kt")
+            )
+        )
+        val result = load(hg, HgDisplayMode.BRANCH)
+
+        assertEquals(
+            listOf(
+                currentBranch, branchRevisions, currentRevision,
+                baseRevision("p1(node1)"), ownFiles, status("p1(node1)")
+            ),
+            hg.calls
+        )
+        assertNull(result.error)
+        assertEquals(listOf("M src/A.kt"), result.files.map { "${it.status} ${it.path}" })
+    }
+
+    @Test
+    fun `the changesets of a long branch are read by a revset without the deselected ones`() {
+        val selected = "(${SelectionRevsets.OWN_COMMITS}) - (node5)"
+        val log = listOf("log", "-r", selected, "--template", BranchRevisions.FILES_TEMPLATE)
+        val prefetch = listOf("log", "-r", "($selected) - (node1)", "--template", ChangesetFiles.TEMPLATE)
+        val singles = (3..30).filter { it != 5 }
+        val touches = "@node1\n>src/F1.kt\n@node2\n>src/F1.kt\n>src/F2.kt\n" +
+            singles.joinToString("\n") { "@node$it\n>src/F$it.kt" } +
+            "\n@node99\n>src/Late.kt"
+        val prefetched = "@node2\nM src/F2.kt\n" + singles.joinToString("\n") { "@node$it\nM src/F$it.kt" }
+        val hg = FakeHg(
+            mapOf(
+                currentBranch to ok("default"),
+                branchRevisions to ok(longLog),
+                currentRevision to ok("default|abc123|Work 30"),
+                baseRevision("p1(node1)") to ok("|000000|"),
+                log to ok(touches),
+                prefetch to ok(prefetched),
+                status("p1(node1)", "node2") to ok("M src/F1.kt")
+            )
+        )
+        val result = load(hg, HgDisplayMode.CHANGESETS, overrides = { listOf("node5=0") })
+
+        assertNull(result.error)
+        assertEquals(
+            listOf(
+                currentBranch, branchRevisions, currentRevision, baseRevision("p1(node1)"),
+                log, prefetch, status("p1(node1)", "node2")
+            ),
+            hg.calls
+        )
+        assertEquals(29, result.files.size)
+        assertTrue(result.files.none { it.path == "src/Late.kt" || it.path == "src/F5.kt" })
+    }
+
     private val changesetLog =
-        listOf("log", "-r", "n1+n2", "--template", BranchRevisions.FILES_TEMPLATE)
+        listOf("log", "-r", SelectionRevsets.OWN_COMMITS,"--template", BranchRevisions.FILES_TEMPLATE)
 
     private val prefetchLog =
-        listOf("log", "-r", "n1+n2", "--template", ChangesetFiles.TEMPLATE)
+        listOf("log", "-r", SelectionRevsets.OWN_COMMITS,"--template", ChangesetFiles.TEMPLATE)
 
     private fun load(
         hg: FakeHg,

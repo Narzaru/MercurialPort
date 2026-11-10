@@ -12,8 +12,8 @@ class ReviewMarksTest {
     private fun marks(
         maxBranches: Int = ReviewMarks.MAX_BRANCHES,
         maxHashesPerPath: Int = ReviewMarks.MAX_HASHES_PER_PATH,
-        maxMarksPerBranch: Int = ReviewMarks.MAX_MARKS_PER_BRANCH
-    ) = ReviewMarks(store, maxBranches, maxHashesPerPath, maxMarksPerBranch).also { it.reload() }
+        maxPathsPerBranch: Int = ReviewMarks.MAX_PATHS_PER_BRANCH
+    ) = ReviewMarks(store, maxBranches, maxHashesPerPath, maxPathsPerBranch).also { it.reload() }
 
     private fun mark(path: String, hash: String) = ReviewMark(path, hash)
 
@@ -76,8 +76,8 @@ class ReviewMarksTest {
     }
 
     @Test
-    fun `the oldest marks of a branch go first over the limit`() {
-        val marks = marks(maxMarksPerBranch = 2)
+    fun `the least recently marked path of a branch goes first over the limit`() {
+        val marks = marks(maxPathsPerBranch = 2)
 
         marks.add("feature", listOf(mark("a.kt", "h1")))
         marks.add("feature", listOf(mark("b.kt", "h1")))
@@ -86,6 +86,55 @@ class ReviewMarksTest {
         assertFalse(marks.contains("feature", "a.kt", "h1"))
         assertTrue(marks.contains("feature", "b.kt", "h1"))
         assertTrue(marks.contains("feature", "c.kt", "h1"))
+    }
+
+    @Test
+    fun `marking a path again saves it from eviction`() {
+        val marks = marks(maxPathsPerBranch = 2)
+        marks.add("feature", listOf(mark("a.kt", "h1")))
+        marks.add("feature", listOf(mark("b.kt", "h1")))
+
+        marks.add("feature", listOf(mark("a.kt", "h1")))
+        marks.add("feature", listOf(mark("c.kt", "h1")))
+
+        assertTrue(marks.contains("feature", "a.kt", "h1"))
+        assertFalse(marks.contains("feature", "b.kt", "h1"))
+        assertEquals(listOf("h1 a.kt", "h1 c.kt"), store.saved["feature"])
+    }
+
+    @Test
+    fun `the limit counts paths, not hashes`() {
+        val marks = marks(maxPathsPerBranch = 2)
+
+        marks.add("feature", listOf(mark("a.kt", "h1"), mark("a.kt", "h2"), mark("a.kt", "h3")))
+        marks.add("feature", listOf(mark("b.kt", "h1"), mark("b.kt", "h2")))
+
+        assertEquals(listOf("h1,h2,h3 a.kt", "h1,h2 b.kt"), store.saved["feature"])
+    }
+
+    @Test
+    fun `stored paths beyond the limit are dropped on load and on the next save`() {
+        store.order = listOf("feature")
+        store.saved["feature"] = listOf("h1 a.kt", "h1 b.kt", "h1 c.kt", "h1 d.kt")
+        val marks = marks(maxPathsPerBranch = 2)
+
+        assertFalse(marks.contains("feature", "b.kt", "h1"))
+        assertTrue(marks.contains("feature", "c.kt", "h1"))
+
+        marks.add("feature", listOf(mark("e.kt", "h1")))
+
+        assertEquals(listOf("h1 d.kt", "h1 e.kt"), store.saved["feature"])
+    }
+
+    @Test
+    fun `a path stored twice keeps its later position`() {
+        store.order = listOf("feature")
+        store.saved["feature"] = listOf("h1 a.kt", "h1 b.kt", "h2 a.kt")
+        val marks = marks(maxPathsPerBranch = 2)
+
+        marks.add("feature", listOf(mark("c.kt", "h1")))
+
+        assertEquals(listOf("h2 a.kt", "h1 c.kt"), store.saved["feature"])
     }
 
     @Test

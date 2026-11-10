@@ -10,42 +10,50 @@ class HgServerWaitTest {
 
     private class Canceled : RuntimeException()
 
+    private val slice = TimeUnit.MILLISECONDS.toNanos(100)
+
     private var nanos = 0L
-    private val sleeps = ArrayList<Long>()
+    private val awaits = ArrayList<Long>()
     private var cancelAfter = Int.MAX_VALUE
     private var checks = 0
+    private var interruptOnAwait = false
 
-    private fun wait(limitSeconds: Long = 30, pollMillis: Long = 2): HgServerWait = HgServerWait(
-        limitNanos = TimeUnit.SECONDS.toNanos(limitSeconds),
-        pollMillis = pollMillis,
+    private val turn = object : HgServerTurn {
+        override fun await(nanos: Long): Boolean {
+            if (interruptOnAwait) throw InterruptedException()
+            awaits.add(nanos)
+            this@HgServerWaitTest.nanos += nanos
+            return false
+        }
+    }
+
+    private fun wait(limitMillis: Long = 30_000): HgServerWait = HgServerWait(
+        limitNanos = TimeUnit.MILLISECONDS.toNanos(limitMillis),
+        cancelCheckNanos = slice,
         clock = { nanos },
-        sleeper = {
-            sleeps.add(it)
-            nanos += TimeUnit.MILLISECONDS.toNanos(it)
-        },
         checkCanceled = { if (checks++ >= cancelAfter) throw Canceled() },
         waitAllowed = { true }
     )
 
     @Test
-    fun `a busy pool is retried until a server comes free`() {
+    fun `a busy pool is asked again each time a wait ends`() {
         var attempts = 0
 
-        val leased = wait().untilReady {
+        val leased = wait().untilReady(turn) {
             attempts++
             if (attempts < 4) HgWaitAttempt.busy() else HgWaitAttempt.ready("server")
         }
 
         assertEquals("server", leased)
         assertEquals(4, attempts)
-        assertEquals(listOf(2L, 2L, 2L), sleeps)
+        assertEquals(listOf(slice, slice, slice), awaits)
     }
 
     @Test
     fun `waiting past the limit gives up so that the caller can run a plain process`() {
         var attempts = 0
 
-        val leased = wait(limitSeconds = 1, pollMillis = 100).untilReady {
+        val leased = wait(limitMillis = 1_000).untilReady(turn) {
             attempts++
             HgWaitAttempt.busy<String>()
         }
@@ -56,17 +64,40 @@ class HgServerWaitTest {
     }
 
     @Test
+    fun `the last wait is cut short to end at the limit`() {
+        wait(limitMillis = 250).untilReady(turn) { HgWaitAttempt.busy<String>() }
+
+        assertEquals(listOf(slice, slice, TimeUnit.MILLISECONDS.toNanos(50)), awaits)
+    }
+
+    @Test
+    fun `a turn that comes before the slice ends is tried at once`() {
+        var attempts = 0
+        val early = object : HgServerTurn {
+            override fun await(nanos: Long): Boolean = true
+        }
+
+        val leased = wait().untilReady(early) {
+            attempts++
+            if (attempts < 3) HgWaitAttempt.busy() else HgWaitAttempt.ready("server")
+        }
+
+        assertEquals("server", leased)
+        assertEquals(0L, nanos)
+    }
+
+    @Test
     fun `a pool that has no server to offer at all is not waited for`() {
         var attempts = 0
 
-        val leased = wait().untilReady {
+        val leased = wait().untilReady(turn) {
             attempts++
             HgWaitAttempt.unavailable<String>()
         }
 
         assertNull(leased)
         assertEquals(1, attempts)
-        assertTrue(sleeps.isEmpty())
+        assertTrue(awaits.isEmpty())
     }
 
     @Test
@@ -75,7 +106,7 @@ class HgServerWaitTest {
         var attempts = 0
 
         val thrown = runCatching {
-            wait().untilReady {
+            wait().untilReady(turn) {
                 attempts++
                 HgWaitAttempt.busy<String>()
             }
@@ -91,7 +122,7 @@ class HgServerWaitTest {
         var attempts = 0
 
         val thrown = runCatching {
-            wait().untilReady {
+            wait().untilReady(turn) {
                 attempts++
                 HgWaitAttempt.ready("server")
             }
@@ -102,22 +133,37 @@ class HgServerWaitTest {
     }
 
     @Test
+    fun `an interrupted wait is passed on to the caller without another attempt`() {
+        interruptOnAwait = true
+        var attempts = 0
+
+        val thrown = runCatching {
+            wait().untilReady(turn) {
+                attempts++
+                HgWaitAttempt.busy<String>()
+            }
+        }.exceptionOrNull()
+
+        assertTrue(thrown is InterruptedException)
+        assertEquals(1, attempts)
+    }
+
+    @Test
     fun `a thread that must not block takes a plain process instead of waiting`() {
         var attempts = 0
         val blocking = HgServerWait(
             clock = { nanos },
-            sleeper = { sleeps.add(it) },
             checkCanceled = {},
             waitAllowed = { false }
         )
 
-        val leased = blocking.untilReady {
+        val leased = blocking.untilReady(turn) {
             attempts++
             HgWaitAttempt.busy<String>()
         }
 
         assertNull(leased)
         assertEquals(1, attempts)
-        assertTrue(sleeps.isEmpty())
+        assertTrue(awaits.isEmpty())
     }
 }

@@ -1,6 +1,8 @@
 package com.narzaru.mercurial.changes
 
+import com.narzaru.mercurial.hg.HgFailure
 import com.narzaru.mercurial.hg.HgPaths
+import com.narzaru.mercurial.hg.HgResult
 import com.narzaru.mercurial.hg.HgStatusParser
 
 sealed interface UnlistedPathsAction {
@@ -12,6 +14,15 @@ sealed interface UnlistedPathsAction {
     data class Ask(val keys: List<String>) : UnlistedPathsAction
 }
 
+sealed interface UnlistedAnswer {
+
+    data class Failed(val details: String) : UnlistedAnswer
+
+    data object Listable : UnlistedAnswer
+
+    data object Quiet : UnlistedAnswer
+}
+
 object UnlistedPathsProbe {
 
     const val MAX_ASKED_PATHS = DiffStatsPlan.MAX_DIFF_PATHS
@@ -19,6 +30,8 @@ object UnlistedPathsProbe {
     const val MAX_WAITING_PATHS = 5000
 
     const val MAX_QUIET_PATHS = 2000
+
+    const val UNFINISHED = "hg status did not finish"
 
     private val LISTABLE = setOf(
         HgStatusParser.MODIFIED_STATUS,
@@ -46,6 +59,13 @@ object UnlistedPathsProbe {
 
     fun listable(stdout: String, untracked: Boolean): Boolean =
         HgStatusParser.parse(stdout).any { matters(it.status, untracked) }
+
+    fun answer(result: HgResult?, untracked: Boolean): UnlistedAnswer = when {
+        result == null -> UnlistedAnswer.Failed(UNFINISHED)
+        !result.success -> UnlistedAnswer.Failed(HgFailure.message(result))
+        listable(result.stdout, untracked) -> UnlistedAnswer.Listable
+        else -> UnlistedAnswer.Quiet
+    }
 
     fun remembered(quiet: Set<String>, keys: Collection<String>): Set<String> {
         val next = LinkedHashSet(quiet)

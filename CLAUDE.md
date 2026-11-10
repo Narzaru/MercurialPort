@@ -65,7 +65,12 @@
   не попадает, его хэш — хэш содержимого с диска (`HgContentHash`, префикс `c:`, выбор файлов —
   `DiffStatsPlan.isHashedByContent`, частичный пересчёт без запуска `hg` — `PartialStatsPlan`);
 - состояние окна изменений — `PathFilter`, `ChangesSettings`, `StatusTextFormatter`, `BranchScope`,
-  `BranchRevisions`, выбор строки открытого файла — `OpenedFileRow`, ключи файлов — `FileKeys`;
+  `BranchRevisions`, revset выбранных ревизий — `SelectionRevsets`, выбор строки открытого файла —
+  `OpenedFileRow`, ключи файлов — `FileKeys`, LRU хранимого — `RecentKeys`, `RevisionOverrides`;
+- реакция на изменения файлов — `FileChangeCoordinator` (события → команды, панель их исполняет);
+  пересчёт ± — `StatsScheduler` (что и когда считать) и `DiffStatsLoader` (запуск `hg diff`);
+- пул command server — `HgServerPool` (очередь ожидания по приходу, аренда, остановка),
+  `HgServerWait`;
 - окно истории — `HistoryFollowPlan` (следование за редактором), `HistoryRenameTrail`,
   `HistoryDiffSelection`;
 - сборка диффа — `HgPatchApplier`, `FragmentScope`;

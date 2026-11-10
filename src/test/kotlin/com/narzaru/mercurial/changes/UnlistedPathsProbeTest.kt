@@ -1,5 +1,7 @@
 package com.narzaru.mercurial.changes
 
+import com.narzaru.mercurial.hg.HgFailure
+import com.narzaru.mercurial.hg.HgResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -107,5 +109,32 @@ class UnlistedPathsProbeTest {
         assertEquals(UnlistedPathsProbe.MAX_QUIET_PATHS, quiet.size)
         assertFalse("obj/file1.dll" in quiet)
         assertTrue("bin/fresh.pdb" in quiet)
+    }
+
+    @Test
+    fun `an unfinished status is a failed answer`() {
+        assertEquals(
+            UnlistedAnswer.Failed(UnlistedPathsProbe.UNFINISHED),
+            UnlistedPathsProbe.answer(null, false)
+        )
+    }
+
+    @Test
+    fun `a failed status carries the hg error`() {
+        assertEquals(
+            UnlistedAnswer.Failed(HgFailure.message(false, "abort: boom")),
+            UnlistedPathsProbe.answer(HgResult(255, "", "abort: boom\n"), false)
+        )
+    }
+
+    @Test
+    fun `a status with a listable file asks for a reload`() {
+        assertEquals(UnlistedAnswer.Listable, UnlistedPathsProbe.answer(HgResult(0, "M src/a.kt", ""), false))
+        assertEquals(UnlistedAnswer.Listable, UnlistedPathsProbe.answer(HgResult(0, "? src/new.kt", ""), true))
+    }
+
+    @Test
+    fun `a status without listable files is quiet`() {
+        assertEquals(UnlistedAnswer.Quiet, UnlistedPathsProbe.answer(HgResult(0, "? src/new.kt", ""), false))
     }
 }

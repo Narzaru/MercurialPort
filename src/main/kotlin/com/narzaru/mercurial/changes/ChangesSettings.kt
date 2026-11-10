@@ -35,11 +35,16 @@ class ChangesSettings(project: Project) : ReviewMarksStore {
         get() = props.getBoolean(key("revisionsVisible"), true)
         set(value) = props.setValue(key("revisionsVisible"), value, true)
 
-    fun revisionOverrides(branch: String): List<String> =
-        props.getList(key("revisions.$branch")).orEmpty()
+    private val overrides = RevisionOverrides(object : RevisionOverridesStore {
+        override fun branchOrder(): List<String> = props.getList(key(REVISION_BRANCHES)).orEmpty()
+        override fun saveBranchOrder(branches: List<String>) = saveList(key(REVISION_BRANCHES), branches)
+        override fun overrides(branch: String): List<String> = props.getList(revisionsKey(branch)).orEmpty()
+        override fun saveOverrides(branch: String, values: List<String>) = saveList(revisionsKey(branch), values)
+    })
 
-    fun setRevisionOverrides(branch: String, values: List<String>) =
-        props.setList(key("revisions.$branch"), values)
+    fun revisionOverrides(branch: String): List<String> = overrides.get(branch)
+
+    fun setRevisionOverrides(branch: String, values: List<String>) = overrides.set(branch, values)
 
     var statsColumnVisible: Boolean
         get() = props.getBoolean(key("statsColumn"), true)
@@ -72,6 +77,8 @@ class ChangesSettings(project: Project) : ReviewMarksStore {
 
     private fun marksKey(branch: String) = key(REVIEW_MARKS_PREFIX + ReviewMarks.storageName(branch))
 
+    private fun revisionsKey(branch: String) = key(REVISIONS_PREFIX + branch)
+
     private fun key(name: String) = PREFIX + name
 
     private companion object {
@@ -81,5 +88,7 @@ class ChangesSettings(project: Project) : ReviewMarksStore {
         const val LEGACY_OPEN_DIFF_INSTEAD_OF_FILE = "openDiffInsteadOfFile"
         const val REVIEW_BRANCHES = "reviewMarks.branches"
         const val REVIEW_MARKS_PREFIX = "reviewMarks.branch."
+        const val REVISIONS_PREFIX = "revisions."
+        const val REVISION_BRANCHES = "revisionOverrides.branches"
     }
 }
