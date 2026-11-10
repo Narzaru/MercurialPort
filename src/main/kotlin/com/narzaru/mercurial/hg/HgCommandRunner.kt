@@ -59,7 +59,9 @@ class HgCommandRunner(private val workDir: File, private val watch: HgCallWatch?
 
     private fun execWherePossible(args: List<String>): Outcome {
         val served = execOnServer(args)
-        return if (served != null) Outcome(served, true) else Outcome(execToResult(args), false)
+        if (served != null) return Outcome(served, true)
+        if (Thread.currentThread().isInterrupted) return Outcome(canceled(args), false)
+        return Outcome(execToResult(args), false)
     }
 
     private fun execOnServer(args: List<String>): HgBytesResult? {
@@ -71,9 +73,8 @@ class HgCommandRunner(private val workDir: File, private val watch: HgCallWatch?
         try {
             val response = HgAwait.finish(call)
             if (response == null) {
-                LOG.warn("${describe(args)} is being run as a plain process: the command server was " +
-                    "left unfinished after $TIMEOUT_SECONDS s")
-                return null
+                LOG.warn("${describe(args)} was left unfinished by the command server after $TIMEOUT_SECONDS s")
+                return HgBytesResult(TIMEOUT_EXIT_CODE, ByteArray(0), timedOutMessage(args))
             }
             settlement = Settlement.RELEASE
             return HgBytesResult(response.exitCode, response.stdout, HgOutputDecoder.decode(response.stderr))
@@ -82,7 +83,7 @@ class HgCommandRunner(private val workDir: File, private val watch: HgCallWatch?
             throw e
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
-            return null
+            return canceled(args)
         } catch (e: Exception) {
             LOG.info("${describe(args)} is being run as a plain process: ${e.message}")
             return null
@@ -112,6 +113,9 @@ class HgCommandRunner(private val workDir: File, private val watch: HgCallWatch?
         servers.lease(workDir)
     } catch (e: ProcessCanceledException) {
         throw e
+    } catch (e: InterruptedException) {
+        Thread.currentThread().interrupt()
+        null
     } catch (e: Exception) {
         LOG.info("${describe(args)} is being run as a plain process: ${e.message}")
         null
@@ -125,7 +129,7 @@ class HgCommandRunner(private val workDir: File, private val watch: HgCallWatch?
             throw e
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
-            HgBytesResult(FAILED_EXIT_CODE, ByteArray(0), canceledMessage(args), failedToStart = true)
+            canceled(args)
         } catch (e: Exception) {
             val message = e.message ?: e.toString()
             LOG.warn("${describe(args)} could not be started: $message", e)
@@ -135,6 +139,7 @@ class HgCommandRunner(private val workDir: File, private val watch: HgCallWatch?
 
     private fun exec(args: List<String>): ProcessOutput {
         val process = GeneralCommandLine(listOf(HG) + args)
+            .withEnvironment(PLAIN_ENVIRONMENT)
             .withWorkingDirectory(workDir.toPath())
             .createProcess()
         try {
@@ -182,8 +187,8 @@ class HgCommandRunner(private val workDir: File, private val watch: HgCallWatch?
 
     private fun describe(args: List<String>): String = (listOf(HG) + args).joinToString(" ")
 
-    private fun canceledMessage(args: List<String>): String =
-        "'${describe(args)}' was canceled before it finished."
+    private fun canceled(args: List<String>): HgBytesResult =
+        HgBytesResult(FAILED_EXIT_CODE, ByteArray(0), "'${describe(args)}' was canceled before it finished.")
 
     private fun timedOutMessage(args: List<String>): String =
         "'${describe(args)}' did not finish within $TIMEOUT_SECONDS seconds and was terminated. " +
@@ -204,6 +209,8 @@ class HgCommandRunner(private val workDir: File, private val watch: HgCallWatch?
         private const val READ_TAIL_SECONDS = 30L
         const val FAILED_EXIT_CODE = -1
         const val TIMEOUT_EXIT_CODE = -2
+
+        internal val PLAIN_ENVIRONMENT = mapOf("HGPLAIN" to "1")
 
         private val LOG = Logger.getInstance(HgCommandRunner::class.java)
 

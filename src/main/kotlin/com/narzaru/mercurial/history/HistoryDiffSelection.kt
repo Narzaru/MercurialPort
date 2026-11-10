@@ -1,6 +1,8 @@
 package com.narzaru.mercurial.history
 
+import com.narzaru.mercurial.hg.HgPaths
 import com.narzaru.mercurial.model.HgHistoryItem
+import java.io.File
 
 class HistoryDiffSelection(
     val newest: HgHistoryItem,
@@ -14,8 +16,10 @@ class HistoryDiffSelection(
 
     val parentRevision: String = oldest.parentRev
 
-    fun tabKey(rightPath: String): String =
-        "range|${oldest.parentRev}|${newest.revision}|$rightPath"
+    fun tabKey(root: File, rightPath: String): String =
+        "range|${HgPaths.key(root.absolutePath)}|${idOf(oldest)}|${idOf(newest)}|$rightPath"
+
+    private fun idOf(item: HgHistoryItem): String = item.node.ifBlank { item.revision }
 
     fun leftLabel(leftPath: String, rightPath: String): String {
         val label = if (hasParent) HistoryStatusText.parentLabel(oldest.parentRev)

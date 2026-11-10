@@ -220,15 +220,14 @@ class ChangesLoader(
         val statsRanges = ArrayList<DiffRange>()
         val renames = HashMap<String, String>()
         for ((range, keys) in groups) {
-            statsRanges.add(range)
-            cache[range].orEmpty()
-                .filter { inScope(it, keys) }
-                .forEach { item ->
-                    if (item.copiedFrom.isNotEmpty()) {
-                        renames[HgPaths.key(item.path)] = HgPaths.key(item.copiedFrom)
-                    }
-                    files.add(item.copy(baseRev = range.base, headRev = range.head))
+            val inRange = cache[range].orEmpty().filter { inScope(it, keys) }
+            if (inRange.isNotEmpty()) statsRanges.add(range)
+            for (item in inRange) {
+                if (item.copiedFrom.isNotEmpty()) {
+                    renames[HgPaths.key(item.path)] = HgPaths.key(item.copiedFrom)
                 }
+                files.add(item.copy(baseRev = range.base, headRev = range.head))
+            }
         }
         return RangeFiles(files, statsRanges, renames)
     }
@@ -330,7 +329,7 @@ class ChangesLoader(
             "log", "-r", BranchRevisions.revset(selectedNodes), "--template", "{join(files, '\\n')}\\n"
         )
         if (!r.success) return null
-        return BranchScope.ownFiles(r.stdout).ifEmpty { null }
+        return BranchScope.ownFiles(r.stdout)
     }
 }
 

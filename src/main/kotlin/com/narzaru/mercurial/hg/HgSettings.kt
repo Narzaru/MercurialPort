@@ -64,6 +64,8 @@ object HgSettings {
     fun boundCount(value: Int): Int =
         value.coerceIn(HgServerPool.MIN_SERVERS, HgServerPool.MAX_SERVERS)
 
+    fun encodingChoice(input: String): String = input.trim().ifEmpty { systemDefault }
+
     fun nativeCharset(): Charset = Charset.forName(systemDefault)
 
     fun fallbackCharset(): Charset {
@@ -74,7 +76,7 @@ object HgSettings {
     private fun properties(): PropertiesComponent? =
         if (ApplicationManager.getApplication() == null) null else PropertiesComponent.getInstance()
 
-    private fun isKnownCharset(name: String): Boolean = try {
+    fun isKnownCharset(name: String): Boolean = try {
         Charset.isSupported(name)
     } catch (_: IllegalArgumentException) {
         false

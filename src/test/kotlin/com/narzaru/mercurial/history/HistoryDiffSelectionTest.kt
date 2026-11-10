@@ -1,11 +1,14 @@
 package com.narzaru.mercurial.history
 
+import com.narzaru.mercurial.hg.HgPaths
 import com.narzaru.mercurial.model.HgHistoryItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class HistoryDiffSelectionTest {
 
@@ -83,10 +86,48 @@ class HistoryDiffSelectionTest {
         )
     }
 
+    private val root = File("D:/repos/app")
+
     @Test
-    fun `the tab key holds both revisions and the path`() {
+    fun `the tab key holds the repository, both ends of the range by node and the path`() {
         val selection = HistoryDiffSelection.of(items, listOf(1, 2))!!
 
-        assertEquals("range|2|4|src/App.kt", selection.tabKey("src/App.kt"))
+        assertEquals(
+            "range|${HgPaths.key(root.absolutePath)}|node3|node4|src/App.kt",
+            selection.tabKey(root, "src/App.kt")
+        )
+    }
+
+    @Test
+    fun `the same range of the same file gives the same tab key`() {
+        assertEquals(
+            HistoryDiffSelection.of(items, listOf(1, 2))!!.tabKey(root, "src/App.kt"),
+            HistoryDiffSelection.of(items, listOf(2, 1))!!.tabKey(File("D:\\Repos\\App"), "src/App.kt")
+        )
+    }
+
+    @Test
+    fun `the same range in another repository gets its own tab`() {
+        val selection = HistoryDiffSelection.of(items, listOf(1, 2))!!
+
+        assertNotEquals(
+            selection.tabKey(File("D:/repos/app"), "src/App.kt"),
+            selection.tabKey(File("D:/repos/lib"), "src/App.kt")
+        )
+    }
+
+    @Test
+    fun `a local revision number reused by another changeset gets its own tab`() {
+        val before = HistoryDiffSelection.of(items, listOf(1))!!
+        val reused = HistoryDiffSelection.of(listOf(item("4", "3").copy(node = "other4")), listOf(0))!!
+
+        assertNotEquals(before.tabKey(root, "src/App.kt"), reused.tabKey(root, "src/App.kt"))
+    }
+
+    @Test
+    fun `a revision without a node is keyed by its number`() {
+        val selection = HistoryDiffSelection.of(listOf(item("4", "3").copy(node = "")), listOf(0))!!
+
+        assertTrue(selection.tabKey(root, "src/App.kt").endsWith("|4|4|src/App.kt"))
     }
 }

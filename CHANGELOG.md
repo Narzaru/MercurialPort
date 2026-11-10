@@ -3,6 +3,42 @@
 # Mercurial Port Changelog
 
 ## [Unreleased]
+### Changed
+- **`hg` runs with `HGPLAIN`.** Colour, `noprefix`, aliases, `[defaults]` and translated messages
+  in the user's hgrc no longer change the output the plugin reads.
+- **A canceled or timed-out `hg` call is reported as such.** A command server that times out is no
+  longer retried as a separate process, and a canceled call starts no `hg` at all.
+- **Clearing the encoding in the settings means the system encoding**, and an unknown encoding is
+  rejected before any other setting is saved.
+
+### Fixed
+- **`Changesets` mode** keeps the files of a changeset that touches a path starting with `@`, no
+  longer diffs the whole repository for revisions whose changes cancel out, and keeps removed or
+  added lines that start with `--` or `++` when rolling the branch's patches back.
+- **`Base` mode lists nothing when the branch's own revisions touched no files**, instead of every
+  file merged in from elsewhere.
+- **A copied file's diff no longer takes the changes of the file it was copied from**, a file
+  emptied on the branch gets its old content back on the left, and paths containing ` b/` are read
+  correctly.
+- **A failed `hg diff` no longer marks modified files as unchanged** and hides them.
+- **Quick edits no longer bring back stale `+N −M` and lose review marks** when two recounts
+  overlap.
+- **A load finished after the comparison changed no longer fills the list with the old files**,
+  such as after clearing the branch name in `Merge` or `Branch` mode.
+- **`F4` before Hg Changes has loaded opens the diff at the caret**, and a diff asked for before a
+  failed load is no longer opened by a later one.
+- **`Always Select Opened File` keeps the TODO that was opened selected**, instead of jumping to
+  the first TODO of the same file.
+- **A folder's reviewed count includes unchanged files**, matching its gray colour.
+- **Hg File History follows the editor reliably**: switching back to a file quickly no longer
+  leaves another file's history on screen, and showing the window picks up the file opened while
+  it was hidden.
+- **`Open` in Hg File History works for revisions from before a rename** and reports a failure in
+  the status line.
+- **History diffs from different repositories get tabs of their own.**
+- **Hg Export saves outside files with the same name side by side** instead of overwriting one
+  with the other.
+- **Closing Hg Changes or Hg File History stops their background work.**
 
 ## [1.0.10] - 2026-11-10
 ### Changed

@@ -127,6 +127,139 @@ class HgPatchApplierTest {
     }
 
     @Test
+    fun `content lines that look like file headers stay in the hunk`() {
+        val dashes = """
+            diff --git a/a.sql b/a.sql
+            --- a/a.sql
+            +++ b/a.sql
+            @@ -1,4 +1,2 @@
+             keep
+            --- x
+            ----
+            ---
+            +++i;
+        """.trimIndent()
+
+        val hunks = HgPatchApplier.parseHunks(dashes)
+
+        assertEquals(1, hunks.size)
+        assertEquals(listOf("keep", "-- x", "---", "--"), hunks[0].oldLines)
+        assertEquals(listOf("keep", "++i;"), hunks[0].newLines)
+    }
+
+    private val copyNextToItsSource = """
+        diff --git a/a.txt b/a.txt
+        --- a/a.txt
+        +++ b/a.txt
+        @@ -1,1 +1,1 @@
+        -a old
+        +a new
+        diff --git a/a.txt b/b.txt
+        copy from a.txt
+        copy to b.txt
+        --- a/a.txt
+        +++ b/b.txt
+        @@ -1,1 +1,1 @@
+        -a old
+        +b new
+    """.trimIndent()
+
+    @Test
+    fun `a copy target takes its own section, not the one of its source`() {
+        val ofB = HgPatchApplier.parseHunks(copyNextToItsSource, listOf("b.txt", "a.txt"))
+
+        assertEquals(listOf("b new"), ofB.single().newLines)
+    }
+
+    @Test
+    fun `a copy source keeps its own section`() {
+        val ofA = HgPatchApplier.parseHunks(copyNextToItsSource, listOf("a.txt"))
+
+        assertEquals(listOf("a new"), ofA.single().newLines)
+    }
+
+    @Test
+    fun `before the copy the target is followed under the name of its source`() {
+        val beforeCopy = """
+            diff --git a/a.txt b/a.txt
+            --- a/a.txt
+            +++ b/a.txt
+            @@ -1,1 +1,1 @@
+            -a older
+            +a old
+        """.trimIndent()
+
+        val hunks = HgPatchApplier.parseHunks(beforeCopy, listOf("b.txt", "a.txt"))
+
+        assertEquals(listOf("a old"), hunks.single().newLines)
+    }
+
+    @Test
+    fun `a path containing a b-slash is found`() {
+        val spaced = """
+            diff --git a/Plan b/x.kt b/Plan b/x.kt
+            --- a/Plan b/x.kt
+            +++ b/Plan b/x.kt
+            @@ -1,1 +1,1 @@
+            -old
+            +new
+        """.trimIndent()
+
+        assertEquals(1, HgPatchApplier.parseHunks(spaced, listOf("Plan b/x.kt")).size)
+    }
+
+    @Test
+    fun `a renamed path containing a b-slash is found by its rename lines`() {
+        val renamed = """
+            diff --git a/Plan b/old.kt b/Plan b/new.kt
+            rename from Plan b/old.kt
+            rename to Plan b/new.kt
+            --- a/Plan b/old.kt
+            +++ b/Plan b/new.kt
+            @@ -1,1 +1,1 @@
+            -old
+            +new
+            diff --git a/Plan b/new.kt b/Plan b/new.kt.orig
+            copy from Plan b/new.kt
+            copy to Plan b/new.kt.orig
+        """.trimIndent()
+
+        val hunks = HgPatchApplier.parseHunks(renamed, listOf("Plan b/new.kt"))
+
+        assertEquals(listOf("new"), hunks.single().newLines)
+    }
+
+    @Test
+    fun `a file emptied by the patch gets its lines back`() {
+        val emptied = """
+            diff --git a/a.txt b/a.txt
+            --- a/a.txt
+            +++ b/a.txt
+            @@ -1,2 +0,0 @@
+            -first
+            -second
+        """.trimIndent()
+
+        val rolled = HgPatchApplier.applyReverse(listOf(""), HgPatchApplier.parseHunks(emptied))
+
+        assertEquals(0, rolled.skipped)
+        assertEquals(listOf("first", "second", ""), rolled.lines)
+    }
+
+    @Test
+    fun `lines deleted without context come back after the line before them`() {
+        val deleted = "@@ -2,2 +1,0 @@\n-second\n-third"
+
+        val rolled = HgPatchApplier.applyReverse(
+            listOf("first", "fourth"),
+            HgPatchApplier.parseHunks(deleted)
+        )
+
+        assertEquals(0, rolled.skipped)
+        assertEquals(listOf("first", "second", "third", "fourth"), rolled.lines)
+    }
+
+    @Test
     fun `output without hunks changes nothing`() {
         assertEquals(emptyList<PatchHunk>(), HgPatchApplier.parseHunks(""))
     }

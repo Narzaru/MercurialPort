@@ -2,6 +2,7 @@ package com.narzaru.mercurial.history
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 class HistoryRenameTrailTest {
@@ -22,7 +23,7 @@ class HistoryRenameTrailTest {
             if (path == "src/App.kt") "text" else null
         }
 
-        assertEquals("text", found.text)
+        assertEquals("text", found.content)
         assertEquals("src/App.kt", found.path)
     }
 
@@ -34,7 +35,7 @@ class HistoryRenameTrailTest {
             if (path == "src/Old.kt") "old text" else null
         }
 
-        assertEquals("old text", found.text)
+        assertEquals("old text", found.content)
         assertEquals("src/Old.kt", found.path)
     }
 
@@ -49,7 +50,7 @@ class HistoryRenameTrailTest {
             if (path == "src/Old.kt") "old text" else null
         }
 
-        assertEquals("old text", found.text)
+        assertEquals("old text", found.content)
         assertEquals("src/Old.kt", found.path)
     }
 
@@ -64,7 +65,7 @@ class HistoryRenameTrailTest {
             if (path == "src/Old.kt") "old text" else null
         }
 
-        assertNull(found.text)
+        assertNull(found.content)
         assertEquals("src/Middle.kt", found.path)
     }
 
@@ -79,7 +80,20 @@ class HistoryRenameTrailTest {
             if (path == "src/Old.kt") "old text" else null
         }
 
-        assertEquals("old text", found.text)
+        assertEquals("old text", found.content)
+        assertEquals("src/Old.kt", found.path)
+    }
+
+    @Test
+    fun `raw bytes of a revision are found under the name it had before a rename`() {
+        val renames = mapOf(("6" to "src/New.kt") to "src/Old.kt")
+        val bytes = byteArrayOf(1, 2, 3)
+
+        val found = trail(renames = renames).follow("src/New.kt", fromRow = 3) { path ->
+            if (path == "src/Old.kt") bytes else null
+        }
+
+        assertSame(bytes, found.content)
         assertEquals("src/Old.kt", found.path)
     }
 
@@ -87,7 +101,7 @@ class HistoryRenameTrailTest {
     fun `nothing is found when neither the path nor its sources exist`() {
         val found = trail().follow("src/App.kt", fromRow = 0) { null }
 
-        assertNull(found.text)
+        assertNull(found.content)
         assertEquals("src/App.kt", found.path)
     }
 }

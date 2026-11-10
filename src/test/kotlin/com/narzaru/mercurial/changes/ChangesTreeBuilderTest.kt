@@ -102,6 +102,17 @@ class ChangesTreeBuilderTest {
     }
 
     @Test
+    fun `an unchanged file is counted as reviewed`() {
+        val same = HgFileItem(status = DiffStatsPlan.UNCHANGED_STATUS, path = "src/same.kt", isUnchanged = true)
+        val root = build(listOf(file("src/a.kt"), same), reviewed = setOf("src/a.kt"))
+
+        val src = root.children.single().dir
+        assertTrue(src.allReviewed)
+        assertEquals(2, src.reviewedCount)
+        assertEquals(2, src.fileCount)
+    }
+
+    @Test
     fun `a directory with every file reviewed is all reviewed`() {
         val root = build(listOf(file("src/a.kt"), file("src/b.kt")), reviewed = setOf("src/a.kt", "src/b.kt"))
 

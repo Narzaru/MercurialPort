@@ -11,52 +11,61 @@ data class PatchHunk(
 
 object HgPatchApplier {
 
-    fun parseHunks(patch: String, paths: Collection<String> = emptyList()): List<PatchHunk> {
+    fun parseHunks(patch: String, paths: List<String> = emptyList()): List<PatchHunk> {
         val sections = splitFiles(patch)
-        val wanted = paths.mapTo(HashSet()) { HgPaths.key(it) }
+        val wanted = paths.map { HgPaths.key(it) }
         val section = when {
             sections.isEmpty() -> return emptyList()
             wanted.isEmpty() -> sections.first()
-            sections.size == 1 && sections.first().names.isEmpty() -> sections.first()
-            else -> sections.firstOrNull { it.names.any { name -> name in wanted } } ?: return emptyList()
+            sections.size == 1 && sections.first().names == null -> sections.first()
+            else -> pick(sections, wanted) ?: return emptyList()
         }
         return parseSection(section.lines)
     }
 
-    private class PatchFile(val names: Set<String>, val lines: List<String>)
+    private fun pick(sections: List<PatchFile>, wanted: List<String>): PatchFile? =
+        wanted.firstNotNullOfOrNull { path -> sections.firstOrNull { it.names?.new == path } }
+            ?: wanted.firstNotNullOfOrNull { path -> sections.firstOrNull { it.names?.old == path } }
+
+    private class PatchFile(val names: HgGitHeader.Names?, val lines: List<String>)
 
     private fun splitFiles(patch: String): List<PatchFile> {
         val files = ArrayList<PatchFile>()
-        var names = emptySet<String>()
+        var names: HgGitHeader.Names? = null
         var lines = ArrayList<String>()
+        var inHeader = false
 
         fun flush() {
-            if (lines.isNotEmpty()) files.add(PatchFile(names, lines))
-            names = emptySet()
+            if (lines.isNotEmpty()) files.add(PatchFile(names?.let(::keys), lines))
+            names = null
             lines = ArrayList()
         }
 
         for (raw in patch.split('\n')) {
             val text = raw.removeSuffix("\r")
-            if (text.startsWith(FILE_HEADER)) {
+            if (text.startsWith(HgGitHeader.PREFIX)) {
                 flush()
-                names = headerNames(text)
-            } else {
-                lines.add(text)
+                names = HgGitHeader.names(text)
+                inHeader = true
+                continue
             }
+            if (text.startsWith("@@")) inHeader = false
+            if (inHeader) {
+                HgGitHeader.source(text)?.let { source ->
+                    names = names?.copy(old = source) ?: HgGitHeader.Names(source, source)
+                }
+                HgGitHeader.target(text)?.let { target ->
+                    names = names?.copy(new = target) ?: HgGitHeader.Names(target, target)
+                }
+            }
+            lines.add(text)
         }
         flush()
         return files
     }
 
-    private fun headerNames(header: String): Set<String> {
-        val rest = header.removePrefix(FILE_HEADER)
-        val b = rest.indexOf(" b/")
-        if (b < 0) return emptySet()
-        val old = rest.take(b).removePrefix("a/")
-        val new = rest.drop(b + " b/".length)
-        return setOf(HgPaths.key(old), HgPaths.key(new))
-    }
+    private fun keys(names: HgGitHeader.Names): HgGitHeader.Names =
+        HgGitHeader.Names(HgPaths.key(names.old), HgPaths.key(names.new))
 
     private fun parseSection(lines: List<String>): List<PatchHunk> {
         val hunks = ArrayList<PatchHunk>()
@@ -88,7 +97,6 @@ object HgPatchApplier {
                     new = ArrayList()
                 }
                 old == null -> Unit
-                text.startsWith("+++") || text.startsWith("---") -> Unit
                 text.startsWith("\\") -> Unit
                 text.startsWith("+") -> {
                     new?.add(text.substring(1)); changeSeen = true; trailing = 0
@@ -140,8 +148,9 @@ object HgPatchApplier {
         for ((cutFront, cutBack) in cuts) {
             val old = hunk.oldLines.drop(cutFront).dropLast(cutBack)
             val new = hunk.newLines.drop(cutFront).dropLast(cutBack)
-            if (old.isEmpty()) continue
-            val at = find(result, old, (hint - 1 + cutFront).coerceAtLeast(0), from, until) ?: continue
+            if (old.isEmpty() && hunk.oldLines.isNotEmpty()) continue
+            val start = if (old.isEmpty()) hint else hint - 1 + cutFront
+            val at = find(result, old, start.coerceAtLeast(0), from, until) ?: continue
             result.subList(at, at + old.size).clear()
             result.addAll(at, strip(new))
             onPlaced(at, new.size)
@@ -179,8 +188,6 @@ object HgPatchApplier {
     private fun strip(lines: List<String>): List<String> = lines.map { it.removePrefix(BOM) }
 
     private const val BOM = "﻿"
-
-    private const val FILE_HEADER = "diff --git "
 
     private const val MAX_FUZZ = 3
 

@@ -21,6 +21,43 @@ class ExportReportTest {
     }
 
     @Test
+    fun `files outside the project with the same name do not overwrite each other`() {
+        val destinations = ExportReport.destinations(
+            listOf("D:/one/a.kt", "D:/repo/src/b.kt", "D:/two/A.kt", "D:/three/a.kt"),
+            "D:/repo"
+        )
+
+        assertEquals(
+            listOf(
+                File(ExportReport.EXTERNAL_DIR, "a.kt").path,
+                "src/b.kt",
+                File(ExportReport.EXTERNAL_DIR, "A (2).kt").path,
+                File(ExportReport.EXTERNAL_DIR, "a (3).kt").path
+            ),
+            destinations
+        )
+    }
+
+    @Test
+    fun `a file outside the project does not take the place of a project file`() {
+        val external = File(ExportReport.EXTERNAL_DIR, "a.kt").path
+        val destinations = ExportReport.destinations(
+            listOf("D:/other/a.kt", "D:/repo/${ExportReport.EXTERNAL_DIR}/a.kt", "D:/other/.gitignore"),
+            "D:/repo"
+        )
+
+        assertEquals(
+            listOf(
+                File(ExportReport.EXTERNAL_DIR, "a (2).kt").path,
+                "${ExportReport.EXTERNAL_DIR}/a.kt",
+                File(ExportReport.EXTERNAL_DIR, ".gitignore").path
+            ),
+            destinations
+        )
+        assertEquals(external, ExportReport.destination("D:/other/a.kt", "D:/repo"))
+    }
+
+    @Test
     fun `a clean export reports the count and the path`() {
         assertEquals("Files copied: 2\nPath: D:/out", ExportReport.message(2, emptyList(), "D:/out"))
     }

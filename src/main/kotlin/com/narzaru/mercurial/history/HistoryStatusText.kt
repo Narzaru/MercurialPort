@@ -23,6 +23,8 @@ object HistoryStatusText {
 
     fun diffError(message: String): String = "Diff error: ${shorten(message)}"
 
+    fun openError(message: String): String = "Open error: ${shorten(message)}"
+
     fun nothingToCompare(catError: String?): String {
         val error = catError?.trim().orEmpty()
         return if (error.isEmpty()) NOTHING_TO_COMPARE else "Hg Error: ${shorten(error)}"

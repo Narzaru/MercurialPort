@@ -94,12 +94,12 @@ class BranchRevisionsTest {
 
     private val filesLog = """
         @d1d82b2
-        src/A.cs
-        src/B.cs
+        >src/A.cs
+        >src/B.cs
         @97fbf27
-        src/B.cs
+        >src/B.cs
         @702a733
-        src/C.cs
+        >src/C.cs
     """.trimIndent() + "\n"
 
     @Test
@@ -113,9 +113,18 @@ class BranchRevisionsTest {
 
     @Test
     fun `a revision that touched nothing gives an empty block`() {
-        val touches = BranchRevisions.parseFileTouches("@d1d82b2\n@97fbf27\nsrc/B.cs\n")
+        val touches = BranchRevisions.parseFileTouches("@d1d82b2\n@97fbf27\n>src/B.cs\n")
 
         assertEquals(emptyList<String>(), touches.getValue("d1d82b2"))
+        assertEquals(listOf("src/B.cs"), touches["97fbf27"])
+    }
+
+    @Test
+    fun `a path starting with the node marker stays a file of its revision`() {
+        val touches = BranchRevisions.parseFileTouches("@d1d82b2\n>@types/x.d.ts\n>src/A.cs\n@97fbf27\n>src/B.cs\n")
+
+        assertEquals(listOf("d1d82b2", "97fbf27"), touches.keys.toList())
+        assertEquals(listOf("@types/x.d.ts", "src/A.cs"), touches["d1d82b2"])
         assertEquals(listOf("src/B.cs"), touches["97fbf27"])
     }
 

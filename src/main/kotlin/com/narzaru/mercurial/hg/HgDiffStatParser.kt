@@ -114,12 +114,8 @@ object HgDiffStatParser {
         HASHED_HEADER_PREFIXES.any { startsWith(bytes, offset, it) }
 
     private fun extractGitPath(bytes: ByteArray, start: Int, end: Int): String? {
-        var i = start
-        while (i + B_SLASH.size <= end) {
-            if (startsWith(bytes, i, B_SLASH)) return decode(bytes, i + B_SLASH.size, end)
-            i++
-        }
-        return null
+        val header = HgOutputDecoder.decode(bytes.copyOfRange(start, end))
+        return HgGitHeader.names(header)?.new?.trim()?.ifEmpty { null }
     }
 
     private fun decode(bytes: ByteArray, from: Int, end: Int): String? {
@@ -132,8 +128,7 @@ object HgDiffStatParser {
     private const val PLUS = '+'.code.toByte()
     private const val MINUS = '-'.code.toByte()
     private const val BACKSLASH = '\\'.code.toByte()
-    private val DIFF_GIT_PREFIX = "diff --git ".toByteArray(Charsets.US_ASCII)
-    private val B_SLASH = " b/".toByteArray(Charsets.US_ASCII)
+    private val DIFF_GIT_PREFIX = HgGitHeader.PREFIX.toByteArray(Charsets.US_ASCII)
     private val RENAME_TO = "rename to ".toByteArray(Charsets.US_ASCII)
     private val COPY_TO = "copy to ".toByteArray(Charsets.US_ASCII)
     private val BINARY_PATCH = "GIT binary patch".toByteArray(Charsets.US_ASCII)

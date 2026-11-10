@@ -8,7 +8,6 @@ import com.intellij.ui.dsl.builder.panel
 import com.narzaru.mercurial.changes.HgChangesService
 import com.narzaru.mercurial.model.ChangesetsFragments
 import com.narzaru.mercurial.status.HgFileStatusService
-import java.nio.charset.Charset
 import javax.swing.JCheckBox
 import javax.swing.JComponent
 import javax.swing.JSpinner
@@ -112,7 +111,7 @@ class HgSettingsConfigurable : Configurable {
         }
     }
 
-    private fun selectedEncoding(): String = (encodingCombo.editor.item as? String)?.trim().orEmpty()
+    private fun selectedEncoding(): String = HgSettings.encodingChoice((encodingCombo.editor.item as? String).orEmpty())
 
     private fun selectedServerCount(): Int =
         HgSettings.boundCount((serverCountSpinner.value as? Number)?.toInt() ?: HgSettings.commandServerCount)
@@ -130,6 +129,11 @@ class HgSettingsConfigurable : Configurable {
             selectedFragments() != HgSettings.changesetsFragments
 
     override fun apply() {
+        val encoding = selectedEncoding()
+        if (!HgSettings.isKnownCharset(encoding)) {
+            throw com.intellij.openapi.options.ConfigurationException("Unknown encoding: $encoding")
+        }
+
         val statusChanged = statusLetterCheck.isSelected != HgSettings.statusInTabs
         val countingChanged = ignoreEolCheck.isSelected != HgSettings.ignoreEolChanges
         val changesetsChanged = widenCheck.isSelected != HgSettings.widenToFragments ||
@@ -145,6 +149,7 @@ class HgSettingsConfigurable : Configurable {
             HgCommandServers.getInstanceOrNull()?.applySettings()
         }
 
+        HgSettings.fallbackEncoding = encoding
         HgSettings.statusInTabs = statusLetterCheck.isSelected
         HgSettings.ignoreEolChanges = ignoreEolCheck.isSelected
         HgSettings.widenToFragments = widenCheck.isSelected
@@ -160,13 +165,6 @@ class HgSettingsConfigurable : Configurable {
                 }
             }
         }
-
-        val encoding = selectedEncoding()
-        if (encoding.isEmpty()) return
-        if (!runCatching { Charset.isSupported(encoding) }.getOrDefault(false)) {
-            throw com.intellij.openapi.options.ConfigurationException("Unknown encoding: $encoding")
-        }
-        HgSettings.fallbackEncoding = encoding
     }
 
     override fun reset() {

@@ -115,19 +115,25 @@ class HgDiffProcessor(project: Project, chain: DiffRequestChain) :
         private fun rightSideCaret(request: ContentDiffRequest, caret: DiffCaret): DiffCaret {
             val right = request.contents.getOrNull(1) as? DocumentContent ?: return caret
             val file = right.highlightFile ?: return caret
-            val line = ReadAction.compute<Int, RuntimeException> {
-                val fileDocument = FileDocumentManager.getInstance().getDocument(file)
-                if (fileDocument == null) caret.line
-                else CaretTransfer.lineOnRightSide(caret.line, fileDocument === right.document) {
-                    translate(fileDocument, right.document, it)
-                }
+            val texts = ReadAction.compute<SideTexts?, RuntimeException> {
+                FileDocumentManager.getInstance().getDocument(file)?.let { SideTexts.of(it, right.document) }
+            } ?: return caret
+            val line = CaretTransfer.lineOnRightSide(caret.line, texts.sameDocument) {
+                translate(texts.file, texts.right, it)
             }
             return caret.copy(line = line)
         }
 
-        private fun translate(from: Document, to: Document, line: Int): Int? =
+        private class SideTexts(val file: CharSequence, val right: CharSequence, val sameDocument: Boolean) {
+            companion object {
+                fun of(file: Document, right: Document): SideTexts =
+                    SideTexts(file.immutableCharSequence, right.immutableCharSequence, file === right)
+            }
+        }
+
+        private fun translate(from: CharSequence, to: CharSequence, line: Int): Int? =
             try {
-                Diff.translateLine(from.charsSequence, to.charsSequence, line, true)
+                Diff.translateLine(from, to, line, true)
             } catch (_: FilesTooBigForDiffException) {
                 null
             }

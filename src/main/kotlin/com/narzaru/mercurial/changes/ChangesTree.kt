@@ -119,7 +119,7 @@ object ChangesTreeBuilder {
                     dir.fileCount++
                     dir.added += payload.item.added
                     dir.removed += payload.item.removed
-                    if (isReviewed(payload.item)) dir.reviewedCount++
+                    if (payload.item.isUnchanged || isReviewed(payload.item)) dir.reviewedCount++
                 }
                 is DirNode -> aggregate(child, childPath(path, payload.name), isReviewed, unreviewed)?.let {
                     dir.fileCount += it.fileCount

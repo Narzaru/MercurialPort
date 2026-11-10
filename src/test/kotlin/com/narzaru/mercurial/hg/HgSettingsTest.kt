@@ -2,6 +2,7 @@ package com.narzaru.mercurial.hg
 
 import com.narzaru.mercurial.model.ChangesetsFragments
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -23,6 +24,19 @@ class HgSettingsTest {
         assertEquals(HgServerPool.MIN_SERVERS, HgSettings.boundCount(0))
         assertEquals(HgServerPool.MAX_SERVERS, HgSettings.boundCount(12))
         assertEquals(3, HgSettings.boundCount(3))
+    }
+
+    @Test
+    fun `a cleared encoding field stands for the system encoding`() {
+        assertEquals(HgSettings.systemDefault, HgSettings.encodingChoice("  "))
+        assertEquals("UTF-8", HgSettings.encodingChoice(" UTF-8 "))
+    }
+
+    @Test
+    fun `only an encoding the runtime knows is accepted`() {
+        assertTrue(HgSettings.isKnownCharset("windows-1251"))
+        assertFalse(HgSettings.isKnownCharset("no-such-encoding"))
+        assertFalse(HgSettings.isKnownCharset("bad name!"))
     }
 
     @Test

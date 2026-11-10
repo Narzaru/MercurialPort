@@ -15,6 +15,8 @@ object BranchRevisions {
 
     private const val FILES_MARKER = "@"
 
+    private const val FILE_MARKER = ">"
+
     const val TEMPLATE = "{rev}|{node|short}|{p2rev}|{author|person}|{date|isodate}|{desc|firstline}"
 
     private const val FIELD_COUNT = 6
@@ -43,18 +45,16 @@ object BranchRevisions {
         return items
     }
 
-    const val FILES_TEMPLATE = "$FILES_MARKER{node|short}\\n{join(files, '\\n')}\\n"
+    const val FILES_TEMPLATE = "$FILES_MARKER{node|short}\\n{files % \"$FILE_MARKER{file}\\n\"}"
 
     fun parseFileTouches(stdout: String): Map<String, List<String>> {
         val result = LinkedHashMap<String, MutableList<String>>()
         var current: MutableList<String>? = null
         for (raw in stdout.split('\r', '\n')) {
             val line = raw.trim()
-            if (line.isEmpty()) continue
-            if (line.startsWith(FILES_MARKER)) {
-                current = result.getOrPut(line.removePrefix(FILES_MARKER)) { ArrayList() }
-            } else {
-                current?.add(line)
+            when {
+                line.startsWith(FILE_MARKER) -> current?.add(line.removePrefix(FILE_MARKER))
+                line.startsWith(FILES_MARKER) -> current = result.getOrPut(line.removePrefix(FILES_MARKER)) { ArrayList() }
             }
         }
         return result

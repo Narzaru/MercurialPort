@@ -57,7 +57,7 @@
 проверить без запущенной IDE, вынесено отдельно и покрыто тестами в `src/test/kotlin`:
 
 - разбор вывода `hg` — `HgStatusParser`, `HgDiffStatParser` (± и хэш диффа файла),
-  `HgLogParser`, `HgOutputDecoder`;
+  `HgLogParser`, `HgOutputDecoder`, заголовок `diff --git` — `HgGitHeader`;
 - пути — `HgPaths`;
 - ревью-отметки — `ReviewState` (ключ: ветка + путь + хэш диффа, отложенные отметки до прихода
   хэша), `ReviewMarks` (хранение по веткам с LRU, за интерфейсом `ReviewMarksStore`, который
@@ -65,7 +65,9 @@
   не попадает, его хэш — хэш содержимого с диска (`HgContentHash`, префикс `c:`, выбор файлов —
   `DiffStatsPlan.isHashedByContent`, частичный пересчёт без запуска `hg` — `PartialStatsPlan`);
 - состояние окна изменений — `PathFilter`, `ChangesSettings`, `StatusTextFormatter`, `BranchScope`,
-  `BranchRevisions`;
+  `BranchRevisions`, выбор строки открытого файла — `OpenedFileRow`;
+- окно истории — `HistoryFollowPlan` (следование за редактором), `HistoryRenameTrail`,
+  `HistoryDiffSelection`;
 - сборка диффа — `HgPatchApplier`, `FragmentScope`;
 - переключение файл ↔ дифф по F4 — `ToggleDiffPlan`, `CaretTransfer`;
 - дерево и отрисовка — `ChangesTreeBuilder`, `UnreviewedDirs`, `ChangesTreeRenderers`, `TextFitter`.

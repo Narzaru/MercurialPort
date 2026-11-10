@@ -62,6 +62,22 @@ class HgDiffStatParserTest {
     }
 
     @Test
+    fun `a path containing a b-slash is kept whole`() {
+        val stats = parse(
+            """
+            diff --git a/Plan b/x.kt b/Plan b/x.kt
+            --- a/Plan b/x.kt
+            +++ b/Plan b/x.kt
+            @@ -1,1 +1,1 @@
+            -old
+            +new
+            """.trimIndent()
+        )
+
+        assertEquals(setOf("Plan b/x.kt"), stats.keys)
+    }
+
+    @Test
     fun `binary patch contributes nothing`() {
         val stats = parse(
             """

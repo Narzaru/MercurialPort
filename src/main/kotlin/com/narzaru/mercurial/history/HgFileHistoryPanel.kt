@@ -27,9 +27,12 @@ import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileTypes.FileType
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Condition
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowManager
+import com.intellij.openapi.wm.ex.ToolWindowManagerListener
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.table.JBTable
@@ -84,13 +87,20 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
 
     private val followAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
 
+    @Volatile
+    private var disposed = false
+
+    private val expired = Condition<Any?> { disposed || project.isDisposed }
+
     init {
         buildUi()
         followActiveEditor()
+        followToolWindowShown()
         currentEditorPath()?.let { loadHistory(it) }
     }
 
     override fun dispose() {
+        disposed = true
         val service = project.service<HgFileHistoryService>()
         if (service.panel === this) service.panel = null
         renameCache.clear()
@@ -118,20 +128,32 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         )
     }
 
+    private fun followToolWindowShown() {
+        project.messageBus.connect(this).subscribe(
+            ToolWindowManagerListener.TOPIC,
+            object : ToolWindowManagerListener {
+                override fun toolWindowShown(toolWindow: ToolWindow) {
+                    if (toolWindow.id != TOOL_WINDOW_ID) return
+                    val path = currentEditorPath() ?: return
+                    requestHistory(path, fromEditor = false, visible = true)
+                }
+            }
+        )
+    }
+
     fun syncTo(path: String) = requestHistory(path, fromEditor = false)
 
-    private fun requestHistory(path: String, fromEditor: Boolean) {
-        if (fromEditor && followSuppressed) return
-        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)
-        if (toolWindow?.isVisible != true) return
-        val normalized = File(path).absolutePath
-        if (target?.file?.absolutePath.equals(normalized, ignoreCase = true)) return
-        if (!fromEditor) {
-            loadHistory(path)
-            return
+    private fun isToolWindowVisible(): Boolean =
+        ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)?.isVisible == true
+
+    private fun requestHistory(path: String, fromEditor: Boolean, visible: Boolean = isToolWindowVisible()) {
+        val step = HistoryFollowPlan.step(path, target?.file?.path, fromEditor, followSuppressed, visible)
+        if (step.cancelsPending) followAlarm.cancelAllRequests()
+        when (step) {
+            HistoryFollowStep.LOAD_NOW -> loadHistory(path)
+            HistoryFollowStep.LOAD_DEBOUNCED -> followAlarm.addRequest({ loadHistory(path) }, FOLLOW_DEBOUNCE_MS)
+            HistoryFollowStep.IGNORE, HistoryFollowStep.DROP, HistoryFollowStep.STAY -> Unit
         }
-        followAlarm.cancelAllRequests()
-        followAlarm.addRequest({ loadHistory(path) }, FOLLOW_DEBOUNCE_MS)
     }
 
     private fun buildUi() {
@@ -285,15 +307,36 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
     private fun openSelected() {
         val current = target ?: return
         val root = current.root ?: return
-        val item = selectedModelRows().firstNotNullOfOrNull { tableModel.itemAt(it) } ?: return
+        val row = selectedModelRows().firstOrNull { tableModel.itemAt(it) != null } ?: return
+        val item = tableModel.itemAt(row) ?: return
         val rel = item.path.ifBlank { HgPaths.relativize(current.file, root) }
+        val trail = renameTrail(root, tableModel.items())
         ApplicationManager.getApplication().executeOnPooledThread {
-            val tmp = extractFile(root, rel, item, "open") ?: return@executeOnPooledThread
+            var failure: String? = null
+            val found = trail.follow(rel, row) { path ->
+                catBytes(root, path, item.revision) { failure = it }
+            }
+            val tmp = found.content?.let { bytes ->
+                writeTempFile(found.path, item, "open", bytes) { failure = it }
+            }
+            val error = failure
             onEdt {
+                if (tmp == null) {
+                    error?.let { statusLabel.text = it }
+                    return@onEdt
+                }
                 val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(tmp) ?: return@onEdt
                 withoutFollow { FileEditorManager.getInstance(project).openFile(vf, true) }
             }
         }
+    }
+
+    private fun renameTrail(root: File, items: List<HgHistoryItem>): HistoryRenameTrail {
+        val revisions = items.map { it.revision }
+        return HistoryRenameTrail(
+            revisionsBelow = { fromRow -> revisions.take(fromRow + 1).reversed() },
+            renameSourceOf = { revision, path -> renameSource(root, revision, path) }
+        )
     }
 
     private fun diffSelected() {
@@ -301,36 +344,32 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         val root = current.root ?: return
         val file = current.file
         val items = tableModel.items()
-        val revisions = items.map { it.revision }
         val selection = HistoryDiffSelection.of(items, selectedModelRows()) ?: return
+        val trail = renameTrail(root, items)
 
         val requestId = ++diffRequestId
         ApplicationManager.getApplication().executeOnPooledThread {
             val fileType = FileTypeManager.getInstance().getFileTypeByFileName(file.name)
             var catError: String? = null
-            val trail = HistoryRenameTrail(
-                revisionsBelow = { fromRow -> revisions.take(fromRow + 1).reversed() },
-                renameSourceOf = { revision, path -> renameSource(root, revision, path) }
-            )
 
             val right = trail.follow(selection.newest.path, selection.newestRow) { path ->
                 catText(root, path, selection.newest.revision) { catError = it }
             }
             val left =
-                if (!selection.hasParent) HistoryRenameTrail.Found(null, right.path)
+                if (!selection.hasParent) HistoryRenameTrail.Found<String>(null, right.path)
                 else trail.follow(selection.oldest.path, selection.oldestRow) { path ->
                     catText(root, path, selection.parentRevision) { catError = it }
                 }
 
             val leftLabel = selection.leftLabel(left.path, right.path)
             val rightLabel = selection.rightLabel()
-            val key = selection.tabKey(right.path)
+            val key = selection.tabKey(root, right.path)
             val error = catError
 
             onEdt {
                 if (requestId != diffRequestId) return@onEdt
                 try {
-                    showDiff(file, fileType, left.text, right.text, leftLabel, rightLabel, key, error)
+                    showDiff(file, fileType, left.content, right.content, leftLabel, rightLabel, key, error)
                 } catch (e: Exception) {
                     LOG.warn("Could not open the diff ($key)", e)
                     statusLabel.text = HistoryStatusText.diffError(e.message ?: e.javaClass.simpleName)
@@ -390,25 +429,37 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         return null
     }
 
-    private fun extractFile(root: File, rel: String, item: HgHistoryItem, prefix: String): File? {
+    private fun catBytes(root: File, rel: String, rev: String, onError: (String) -> Unit): ByteArray? {
+        val res = HgCommandRunner(root).runToBytesDetailed(listOf("cat", "-r", rev, rel))
+        if (res.exitCode == 0) return res.stdout
+        val details = res.stderr.trim().ifBlank { "hg cat -r $rev $rel: exit ${res.exitCode}" }
+        onError(HistoryStatusText.hgError(details, res.failedToStart))
+        LOG.warn("hg cat -r $rev $rel failed: ${HgFailure.message(res.failedToStart, details)}")
+        return null
+    }
+
+    private fun writeTempFile(
+        rel: String,
+        item: HgHistoryItem,
+        prefix: String,
+        bytes: ByteArray,
+        onError: (String) -> Unit
+    ): File? {
         val tmp = File(
             System.getProperty("java.io.tmpdir"),
             HistoryTempFileName.of(rel, prefix, item.revision, item.author)
         )
-        val res = HgCommandRunner(root).runToBytesDetailed(listOf("cat", "-r", item.revision, rel))
-        if (res.exitCode != 0) {
-            LOG.warn("hg cat -r ${item.revision} $rel failed: ${HgFailure.message(res.failedToStart, res.stderr)}")
-            return null
-        }
         return try {
-            tmp.writeBytes(res.stdout)
+            tmp.writeBytes(bytes)
             tmp
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            LOG.warn("Could not write $tmp", e)
+            onError(HistoryStatusText.openError(e.message ?: e.javaClass.simpleName))
             null
         }
     }
 
-    private fun onEdt(task: () -> Unit) = ApplicationManager.getApplication().invokeLater(task)
+    private fun onEdt(task: () -> Unit) = ApplicationManager.getApplication().invokeLater(task, expired)
 
     fun withoutFollow(block: () -> Unit) {
         followSuppressed = true

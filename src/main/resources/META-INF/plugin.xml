@@ -18,7 +18,7 @@
                 Hg Changes. A revision is diffed against its first parent, renames are followed, and a
                 revision that creates or deletes the file renders an empty side.</li>
             <li><b>TODO mode</b>: TODO comments in changed files, including unsaved editor buffers.</li>
-            <li><b>Hg Export</b>: copy open editor files to a folder or open it in Total Commander.</li>
+            <li><b>Hg Export</b>: copy open editor files to a folder.</li>
         </ul>
         <p>Output of <code>hg</code> is decoded line by line as UTF-8 with a configurable fallback
         encoding, so commit messages written in a legacy codepage stay readable.</p>

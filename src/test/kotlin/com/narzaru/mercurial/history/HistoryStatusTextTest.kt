@@ -24,6 +24,11 @@ class HistoryStatusTextTest {
     }
 
     @Test
+    fun `a failure to open a revision is reported`() {
+        assertEquals("Open error: disk full", HistoryStatusText.openError("  disk full \n"))
+    }
+
+    @Test
     fun `a missing hg is reported apart from an error returned by hg`() {
         assertEquals(
             "Cannot run hg: no such file",

@@ -19,13 +19,13 @@ object DiffStatsPlan {
 
     fun applyStats(
         files: List<HgFileItem>,
-        stats: Map<DiffRange, Map<String, HgDiffStat>>,
+        stats: Map<DiffRange, Map<String, HgDiffStat>?>,
         targetRev: String
     ): List<HgFileItem> = files.map { counted(it, stats, targetRev) }
 
     fun applyStatsToKeys(
         files: List<HgFileItem>,
-        stats: Map<DiffRange, Map<String, HgDiffStat>>,
+        stats: Map<DiffRange, Map<String, HgDiffStat>?>,
         targetRev: String,
         keys: Set<String>
     ): List<HgFileItem> = files.map { item ->
@@ -34,7 +34,7 @@ object DiffStatsPlan {
 
     fun diffHashes(
         files: List<HgFileItem>,
-        stats: Map<DiffRange, Map<String, HgDiffStat>>,
+        stats: Map<DiffRange, Map<String, HgDiffStat>?>,
         targetRev: String,
         contentHashes: Map<String, String> = emptyMap()
     ): Map<String, String> {
@@ -69,10 +69,12 @@ object DiffStatsPlan {
 
     private fun counted(
         item: HgFileItem,
-        stats: Map<DiffRange, Map<String, HgDiffStat>>,
+        stats: Map<DiffRange, Map<String, HgDiffStat>?>,
         targetRev: String
     ): HgFileItem {
-        val stat = statOf(item, stats[rangeOf(item, targetRev)].orEmpty())
+        val range = rangeOf(item, targetRev)
+        if (range in stats && stats[range] == null) return item
+        val stat = statOf(item, stats[range].orEmpty())
         val unchanged = statusOf(item) == HgStatusParser.MODIFIED_STATUS && stat == null
         return item.copy(
             status = if (unchanged) UNCHANGED_STATUS else statusOf(item),

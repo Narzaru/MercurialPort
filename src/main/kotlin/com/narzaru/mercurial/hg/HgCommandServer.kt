@@ -35,6 +35,7 @@ class HgServerStartup private constructor(private val process: Process, private 
 
         fun launch(workDir: File): HgServerStartup? = try {
             val process = GeneralCommandLine(HgCommandServer.COMMAND)
+                .withEnvironment(HgCommandRunner.PLAIN_ENVIRONMENT)
                 .withWorkingDirectory(workDir.toPath())
                 .createProcess()
             HgAwait.start("hg command server stderr") {

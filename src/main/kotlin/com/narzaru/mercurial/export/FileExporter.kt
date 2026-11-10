@@ -34,6 +34,7 @@ object FileExporter {
         val sources = FileEditorManager.getInstance(project).openFiles
             .map { File(it.path) }
             .filter { it.isFile }
+        val destinations = ExportReport.destinations(sources.map { it.absolutePath }, projectRoot.absolutePath)
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Exporting open files", true) {
             override fun run(indicator: ProgressIndicator) {
@@ -47,7 +48,7 @@ object FileExporter {
                     indicator.checkCanceled()
                     indicator.fraction = (index + 1).toDouble() / sources.size
                     indicator.text2 = source.name
-                    if (copyFile(source, projectRoot, sessionDir, failures)) copied++
+                    if (copyFile(source, File(sessionDir, destinations[index]), failures)) copied++
                 }
                 showOnUi {
                     Messages.showInfoMessage(
@@ -60,13 +61,7 @@ object FileExporter {
         })
     }
 
-    private fun copyFile(
-        source: File,
-        projectRoot: File,
-        sessionDir: File,
-        failures: MutableList<String>
-    ): Boolean {
-        val dest = File(sessionDir, ExportReport.destination(source.absolutePath, projectRoot.absolutePath))
+    private fun copyFile(source: File, dest: File, failures: MutableList<String>): Boolean {
         val parent = dest.parentFile
         if (parent != null && !createDir(parent)) {
             failures.add("${source.path} — cannot create ${parent.path}")

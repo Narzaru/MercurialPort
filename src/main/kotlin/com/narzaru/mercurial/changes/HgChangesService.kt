@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicReference
 @Service(Service.Level.PROJECT)
 class HgChangesService(val project: Project) {
 
+    @Volatile
     var panel: HgChangesPanel? = null
 
     private val pendingCarets = ConcurrentHashMap<String, DiffCaret>()
@@ -40,6 +41,7 @@ class HgChangesService(val project: Project) {
 
     fun requestDiff(path: String, caret: DiffCaret?) {
         requestedDiff.set(RequestedDiff(path, caret))
+        panel?.loadForRequestedDiff()
     }
 
     fun takeRequestedDiff(): RequestedDiff? = requestedDiff.getAndSet(null)

@@ -161,6 +161,44 @@ class DiffStatsPlanTest {
     }
 
     @Test
+    fun `a file of a range whose diff failed stays as it was`() {
+        val files = listOf(
+            item("a.kt").copy(added = 3, removed = 1),
+            item("b.kt", "7", "9")
+        )
+        val stats = mapOf(
+            DiffRange("42", "") to null,
+            DiffRange("7", "9") to emptyMap<String, HgDiffStat>()
+        )
+
+        val counted = DiffStatsPlan.applyStats(files, stats, "42")
+
+        assertEquals(files[0], counted[0])
+        assertTrue(counted[1].isUnchanged)
+    }
+
+    @Test
+    fun `a file counted alone after a failed diff stays as it was`() {
+        val files = listOf(item("a.kt").copy(added = 3, removed = 1))
+
+        val counted = DiffStatsPlan.applyStatsToKeys(files, mapOf(DiffRange("42", "") to null), "42", setOf("a.kt"))
+
+        assertEquals(files, counted)
+    }
+
+    @Test
+    fun `a file of a range whose diff failed gets no hash`() {
+        val stats = mapOf(
+            DiffRange("42", "") to null,
+            DiffRange("7", "9") to mapOf("b.kt" to HgDiffStat(1, 0, "h1"))
+        )
+
+        val hashes = DiffStatsPlan.diffHashes(listOf(item("a.kt"), item("b.kt", "7", "9")), stats, "42")
+
+        assertEquals(mapOf("b.kt" to "h1"), hashes)
+    }
+
+    @Test
     fun `counting one file leaves the others as they were`() {
         val files = listOf(
             item("a.kt").copy(added = 1, removed = 1),

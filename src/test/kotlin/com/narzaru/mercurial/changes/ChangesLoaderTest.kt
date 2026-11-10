@@ -113,6 +113,42 @@ class ChangesLoaderTest {
     }
 
     @Test
+    fun `the base mode of a branch whose own revisions touched no files lists nothing`() {
+        val hg = FakeHg(
+            mapOf(
+                currentBranch to ok("feature"),
+                branchRevisions to ok(revisionsLog),
+                currentRevision to ok("feature|abc123|Work in progress"),
+                baseRevision(branchPoint) to ok("default|def456|Parent work"),
+                listOf("log", "-r", "n1+n2", "--template", "{join(files, '\\n')}\\n") to ok("\n\n"),
+                status(branchPoint) to ok("M src/Merged.kt\nA src/AlsoMerged.kt")
+            )
+        )
+        val result = load(hg, HgDisplayMode.BRANCH)
+
+        assertNull(result.error)
+        assertEquals(emptyList<String>(), result.files.map { it.path })
+    }
+
+    @Test
+    fun `the base mode lists every file when the own files cannot be read`() {
+        val hg = FakeHg(
+            mapOf(
+                currentBranch to ok("feature"),
+                branchRevisions to ok(revisionsLog),
+                currentRevision to ok("feature|abc123|Work in progress"),
+                baseRevision(branchPoint) to ok("default|def456|Parent work"),
+                listOf("log", "-r", "n1+n2", "--template", "{join(files, '\\n')}\\n") to failed("abort: boom"),
+                status(branchPoint) to ok("M src/Merged.kt")
+            )
+        )
+        val result = load(hg, HgDisplayMode.BRANCH)
+
+        assertEquals(listOf("src/Merged.kt"), result.files.map { it.path })
+        assertEquals(emptyMap<DiffRange, List<String>>(), result.statsPaths)
+    }
+
+    @Test
     fun `an unselected revision is left out of the compared range`() {
         val onlySecond = "p1(min(n2))"
         val asked = ArrayList<String>()
@@ -183,7 +219,7 @@ class ChangesLoaderTest {
                 branchRevisions to ok(revisionsLog),
                 currentRevision to ok("feature|abc123|Work in progress"),
                 baseRevision(branchPoint) to ok("default|def456|Parent work"),
-                changesetLog to ok("@n1\nsrc/A.kt\n@n2\nsrc/B.kt"),
+                changesetLog to ok("@n1\n>src/A.kt\n@n2\n>src/B.kt"),
                 prefetchLog to ok("@n1\nM src/A.kt\n@n2\nA src/B.kt")
             )
         )
@@ -219,7 +255,7 @@ class ChangesLoaderTest {
                 branchRevisions to ok(revisionsLog),
                 currentRevision to ok("feature|abc123|Work in progress"),
                 baseRevision(branchPoint) to ok("default|def456|Parent work"),
-                changesetLog to ok("@n1\nsrc/A.kt\n@n2\nsrc/A.kt\nsrc/B.kt"),
+                changesetLog to ok("@n1\n>src/A.kt\n@n2\n>src/A.kt\n>src/B.kt"),
                 status("p1(n1)", "n2") to ok("M src/A.kt"),
                 status("p1(n2)", "n2") to ok("A src/B.kt")
             )
@@ -246,6 +282,28 @@ class ChangesLoaderTest {
     }
 
     @Test
+    fun `a range whose files cancelled out is not counted`() {
+        val hg = FakeHg(
+            mapOf(
+                currentBranch to ok("feature"),
+                branchRevisions to ok(revisionsLog),
+                currentRevision to ok("feature|abc123|Work in progress"),
+                baseRevision(branchPoint) to ok("default|def456|Parent work"),
+                changesetLog to ok("@n1\n>src/A.kt\n@n2\n>src/A.kt\n>src/B.kt"),
+                status("p1(n1)", "n2") to ok(""),
+                status("p1(n2)", "n2") to ok("R src/A.kt\nA src/B.kt")
+            )
+        )
+        val result = load(hg, HgDisplayMode.CHANGESETS)
+
+        assertEquals(listOf("A src/B.kt p1(n2)..n2"), result.files.map {
+            "${it.status} ${it.path} ${it.baseRev}..${it.headRev}"
+        })
+        assertEquals(listOf(DiffRange("p1(n2)", "n2")), result.statsRanges)
+        assertEquals(mapOf(DiffRange("p1(n2)", "n2") to listOf("src/B.kt")), result.statsPaths)
+    }
+
+    @Test
     fun `a renamed file joins the ranges of both its names`() {
         val renameStatus = "A src/New.kt\n  src/Old.kt\nR src/Old.kt"
         val hg = FakeHg(
@@ -254,7 +312,7 @@ class ChangesLoaderTest {
                 branchRevisions to ok(revisionsLog),
                 currentRevision to ok("feature|abc123|Work in progress"),
                 baseRevision(branchPoint) to ok("default|def456|Parent work"),
-                changesetLog to ok("@n1\nsrc/Old.kt\n@n2\nsrc/New.kt\nsrc/Old.kt"),
+                changesetLog to ok("@n1\n>src/Old.kt\n@n2\n>src/New.kt\n>src/Old.kt"),
                 status("p1(n1)", "n2") to ok(renameStatus),
                 status("p1(n2)", "n2") to ok(renameStatus)
             )
@@ -303,7 +361,9 @@ class ChangesLoaderTest {
                 branchRevisions to ok(revisionsLog),
                 currentRevision to ok("feature|abc123|Work in progress"),
                 baseRevision(branchPoint) to ok("default|def456|Parent work"),
-                changesetLog to ok("@n1\nsrc/New.kt\nsrc/Old.kt\nsrc/Gone.kt\nsrc/Kept.kt\n@n2\nsrc/New.kt\nsrc/Extra.kt"),
+                changesetLog to ok(
+                    "@n1\n>src/New.kt\n>src/Old.kt\n>src/Gone.kt\n>src/Kept.kt\n@n2\n>src/New.kt\n>src/Extra.kt"
+                ),
                 prefetchLog to ok(prefetched),
                 status("p1(n1)", "n2") to ok(spanStatus)
             )
@@ -348,7 +408,7 @@ class ChangesLoaderTest {
                 branchRevisions to ok(revisionsLog),
                 currentRevision to ok("feature|abc123|Work in progress"),
                 baseRevision(branchPoint) to ok("default|def456|Parent work"),
-                changesetLog to ok("@n1\nsrc/A.kt\n@n2\nsrc/A.kt\nsrc/B.kt"),
+                changesetLog to ok("@n1\n>src/A.kt\n@n2\n>src/A.kt\n>src/B.kt"),
                 status("p1(n1)", "n2") to failed("abort: unknown revision"),
                 status("p1(n2)", "n2") to ok("A src/B.kt")
             )
