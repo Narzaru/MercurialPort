@@ -6,66 +6,27 @@ import org.junit.Test
 class ToggleDiffPlanTest {
 
     @Test
-    fun `a diff tab switches to its source file`() {
-        assertEquals(
-            ToggleDiffTarget.ShowFile("/repo/a.txt"),
-            ToggleDiffPlan.of(true, "/repo/a.txt", false, false, null)
-        )
-    }
-
-    @Test
-    fun `a diff tab without a source file does nothing`() {
-        assertEquals(
-            ToggleDiffTarget.None,
-            ToggleDiffPlan.of(true, null, false, false, null)
-        )
+    fun `a diff leaves jump to source to the platform`() {
+        assertEquals(ToggleDiffTarget.None, ToggleDiffPlan.of(true, true, true, "a.txt"))
     }
 
     @Test
     fun `a changed file switches to its diff`() {
-        assertEquals(
-            ToggleDiffTarget.ShowDiff("a.txt"),
-            ToggleDiffPlan.of(false, null, true, true, "a.txt")
-        )
+        assertEquals(ToggleDiffTarget.ShowDiff("a.txt"), ToggleDiffPlan.of(false, true, true, "a.txt"))
     }
 
     @Test
     fun `an unchanged file does nothing`() {
-        assertEquals(
-            ToggleDiffTarget.None,
-            ToggleDiffPlan.of(false, null, true, true, null)
-        )
+        assertEquals(ToggleDiffTarget.None, ToggleDiffPlan.of(false, true, true, null))
     }
 
     @Test
     fun `a file loads the changes when they are not there yet`() {
-        assertEquals(
-            ToggleDiffTarget.LoadChanges,
-            ToggleDiffPlan.of(false, null, true, false, null)
-        )
-    }
-
-    @Test
-    fun `a file shown as a diff in its own tab swaps the two sides`() {
-        assertEquals(
-            ToggleDiffTarget.SwapInline,
-            ToggleDiffPlan.of(false, null, false, false, null, inInlineDiff = true)
-        )
-    }
-
-    @Test
-    fun `swapping in place wins over opening a separate diff tab`() {
-        assertEquals(
-            ToggleDiffTarget.SwapInline,
-            ToggleDiffPlan.of(true, "/repo/a.txt", true, true, "a.txt", inInlineDiff = true)
-        )
+        assertEquals(ToggleDiffTarget.LoadChanges, ToggleDiffPlan.of(false, true, false, null))
     }
 
     @Test
     fun `a file outside an editor does nothing`() {
-        assertEquals(
-            ToggleDiffTarget.None,
-            ToggleDiffPlan.of(false, null, false, false, null)
-        )
+        assertEquals(ToggleDiffTarget.None, ToggleDiffPlan.of(false, false, true, "a.txt"))
     }
 }

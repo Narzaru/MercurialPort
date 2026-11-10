@@ -49,16 +49,13 @@ class ChangesSettings(project: Project) : ReviewMarksStore {
         get() = props.getBoolean(key("markReviewedOnOpen"), true)
         set(value) = props.setValue(key("markReviewedOnOpen"), value, true)
 
-    var openDiffInsteadOfFile: Boolean
-        get() = props.getBoolean(key("openDiffInsteadOfFile"), false)
-        set(value) = props.setValue(key("openDiffInsteadOfFile"), value, false)
-
     var selectOpenedFile: Boolean
         get() = props.getBoolean(key("selectOpenedFile"), false)
         set(value) = props.setValue(key("selectOpenedFile"), value, false)
 
     init {
         props.unsetValue(key(LEGACY_REVIEWED))
+        props.unsetValue(key(LEGACY_OPEN_DIFF_INSTEAD_OF_FILE))
     }
 
     override fun branchOrder(): List<String> = props.getList(key(REVIEW_BRANCHES)).orEmpty()
@@ -81,6 +78,7 @@ class ChangesSettings(project: Project) : ReviewMarksStore {
         const val PREFIX = "mercurial."
         const val DEFAULT_BRANCH = "default"
         const val LEGACY_REVIEWED = "reviewed"
+        const val LEGACY_OPEN_DIFF_INSTEAD_OF_FILE = "openDiffInsteadOfFile"
         const val REVIEW_BRANCHES = "reviewMarks.branches"
         const val REVIEW_MARKS_PREFIX = "reviewMarks.branch."
     }

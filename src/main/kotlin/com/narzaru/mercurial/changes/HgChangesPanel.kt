@@ -55,7 +55,6 @@ import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.util.Computable
-import com.intellij.openapi.util.Pair
 import com.intellij.ui.JBSplitter
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
@@ -580,14 +579,6 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                 Separator.getInstance(),
                 toggle("Show ± Column", "Show the added/removed lines column", null,
                     { statsVisible }) { setStatsVisible(!statsVisible) },
-                toggle(
-                    "Open Diff Instead of File",
-                    "A navigation started in a diff lands in the diff of the changed file it reaches",
-                    null,
-                    { settings.openDiffInsteadOfFile }
-                ) {
-                    settings.openDiffInsteadOfFile = !settings.openDiffInsteadOfFile
-                },
                 toggle("Mark Reviewed on Open", "Mark a file reviewed when it is opened", null,
                     { settings.markReviewedOnOpen }) {
                     settings.markReviewedOnOpen = !settings.markReviewedOnOpen
@@ -1415,7 +1406,6 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun openFile(item: HgFileItem) {
         val repoRoot = comparison.repoRoot ?: return
         val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(File(repoRoot, item.path)) ?: return
-        project.service<HgChangesService>().openAsFile(vf.path)
         val line = CaretTransfer.fileTarget(null, item.lineNumber)
         NavigationHistory.record(project) {
             if (line != null) {
@@ -1439,7 +1429,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                 File(repoRoot, item.path).path,
                 key,
                 null,
-                requested.caretLine,
+                requested.caret,
                 requestFocus = true
             )
         }
@@ -1620,11 +1610,8 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
         val request = SimpleDiffRequest(localFile.name, baseContent, rightContent, baseTitle, rightTitle)
         request.putUserData(DiffUserDataKeys.PREFERRED_FOCUS_SIDE, Side.RIGHT)
-        project.service<HgChangesService>().takePendingLine(localFile.path)?.let { line ->
-            request.putUserData(
-                DiffUserDataKeys.SCROLL_TO_LINE,
-                Pair.create(Side.RIGHT, line)
-            )
+        project.service<HgChangesService>().takePendingCaret(localFile.path)?.let {
+            HgDiffProcessor.requestRightCaret(request, it)
         }
         return request
     }

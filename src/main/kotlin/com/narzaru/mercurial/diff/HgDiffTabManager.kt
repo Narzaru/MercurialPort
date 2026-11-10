@@ -1,5 +1,6 @@
 package com.narzaru.mercurial.diff
 
+import com.narzaru.mercurial.changes.DiffCaret
 import com.narzaru.mercurial.history.HgFileHistoryService
 import com.intellij.diff.chains.DiffRequestChain
 import com.intellij.diff.chains.SimpleDiffRequestChain
@@ -60,9 +61,9 @@ class HgDiffTabManager(private val project: Project) : Disposable {
         restoreFocus(focusBack)
     }
 
-    fun scrollShownChangesTab(key: String, line: Int): Boolean {
+    fun placeCaretInShownChangesTab(key: String, caret: DiffCaret): Boolean {
         val diffFile = synchronized(tabs) { tabs[HgDiffTabKeys.changes(key)] } ?: return false
-        return diffFile.scrollToRightLine(line)
+        return diffFile.placeRightCaret(caret)
     }
 
     fun reloadOpenTabs() {

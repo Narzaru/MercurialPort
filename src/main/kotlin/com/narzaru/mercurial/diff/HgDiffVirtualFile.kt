@@ -1,7 +1,7 @@
 package com.narzaru.mercurial.diff
 
+import com.narzaru.mercurial.changes.DiffCaret
 import com.narzaru.mercurial.changes.HgDiffProcessor
-import com.intellij.diff.FrameDiffTool
 import com.intellij.diff.chains.DiffRequestChain
 import com.intellij.diff.editor.ChainDiffVirtualFile
 import com.intellij.diff.impl.DiffRequestProcessor
@@ -18,8 +18,7 @@ class HgDiffVirtualFile(chain: DiffRequestChain, name: String, val sourcePath: S
         DiffHistoryScope.keepsPlaces(DiffSettings.getSettings().isIncludedInNavigationHistory)
 
     override fun createProcessor(project: Project): DiffRequestProcessor {
-        val processor = HgDiffProcessor(project, chain, ToggleDiffPromotion.replacesJumpToSourceIn(sourcePath))
-        processor.putContextUserData(ToggleDiffContext.DIFF_FILE, this)
+        val processor = HgDiffProcessor(project, chain)
         processors.add(processor)
         return processor
     }
@@ -28,10 +27,8 @@ class HgDiffVirtualFile(chain: DiffRequestChain, name: String, val sourcePath: S
         livingProcessors().forEach { it.reload() }
     }
 
-    fun activeViewer(): FrameDiffTool.DiffViewer? = livingProcessors().firstNotNullOfOrNull { it.activeViewer }
-
-    fun scrollToRightLine(line: Int): Boolean =
-        livingProcessors().map { it.scrollToRightLine(line) }.any { it }
+    fun placeRightCaret(caret: DiffCaret): Boolean =
+        livingProcessors().map { it.placeRightCaret(caret) }.any { it }
 
     private fun livingProcessors(): List<HgDiffProcessor> = synchronized(processors) {
         processors.removeAll { it.isDisposed }

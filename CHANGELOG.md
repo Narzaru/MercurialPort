@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [1.0.10] - 2026-11-10
+### Changed
+- **`F4` switches between a file and its diff the way Git does.** A jump from a diff, such as
+  `Go To Declaration`, opens the plain file, and the diff always opens in a diff tab of its own.
+  `F4` in a diff opens the file, and `F4` in a file changed in the current comparison opens its
+  diff at the caret line and column, in `Changesets` mode too, where the line is carried over to
+  the revision text. `Jump to Source` is back on the diff toolbar.
+
+### Removed
+- **`Open Diff Instead of File`**, along with the diff shown in the file's own tab. Such a tab
+  looked like the file, and `Go To Declaration` and a second `F4` did not work in it.
+
 ## [1.0.9] - 2026-10-26
 ### Changed
 - **A review mark belongs to the change that was reviewed.** A mark is kept per branch and per

@@ -67,8 +67,7 @@
 - состояние окна изменений — `PathFilter`, `ChangesSettings`, `StatusTextFormatter`, `BranchScope`,
   `BranchRevisions`;
 - сборка диффа — `HgPatchApplier`, `FragmentScope`;
-- дифф вместо файла — `DiffRedirectPolicy`, `NavigationArming`, `DiffNavigationOrigin`,
-  `InlineDiffArming`, `ToggleDiffPlan`, `CaretTransfer`, `JumpToSourceSlot`;
+- переключение файл ↔ дифф по F4 — `ToggleDiffPlan`, `CaretTransfer`;
 - дерево и отрисовка — `ChangesTreeBuilder`, `UnreviewedDirs`, `ChangesTreeRenderers`, `TextFitter`.
 
 Новую логику имеет смысл добавлять туда же, а не в панель: внутри Swing-компонента её не вызвать
