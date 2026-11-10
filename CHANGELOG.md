@@ -9,10 +9,10 @@
   `Merge` still work for it. 0 turns the limit off.
 
 ### Changed
-- **The branch field in Hg Changes lists the repository's active branches**, those neither closed
-  nor merged; any branch or revision can still be typed.
-- **Editing the branch name reloads the list** shortly after typing stops, or at once on `Enter` or
-  when a branch is picked from the list.
+- **The branch field in Hg Changes suggests branches**: `default` and every open branch not yet
+  merged into it, filtered as you type. Any branch or revision can still be typed.
+- **The branch name applies by itself** once it matches a known branch, shortly after typing stops;
+  any other text applies on `Enter`, on picking a suggestion or on leaving the field.
 - **`hg` runs with `HGPLAIN`.** Colour, `noprefix`, aliases, `[defaults]` and translated messages
   in the user's hgrc no longer change the output the plugin reads.
 - **A canceled or timed-out `hg` call is reported as such.** A command server that times out is no

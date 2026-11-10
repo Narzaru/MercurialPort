@@ -64,4 +64,44 @@ class BranchReloadPlanTest {
 
         assertTrue(plan.needsReload(true, "stable"))
     }
+
+    @Test
+    fun `typing a known branch reloads while typing`() {
+        plan.loadStarted(true, "default")
+
+        assertTrue(plan.reloadsWhileTyping(true, " stable ", listOf("default", "stable")))
+    }
+
+    @Test
+    fun `typing an unknown text waits for it to be applied`() {
+        plan.loadStarted(true, "default")
+
+        assertFalse(plan.reloadsWhileTyping(true, "stab", listOf("default", "stable")))
+        assertFalse(plan.reloadsWhileTyping(true, "tip~3", listOf("default", "stable")))
+        assertTrue(plan.needsReload(true, "tip~3"))
+    }
+
+    @Test
+    fun `a known branch must match case exactly while typing`() {
+        plan.loadStarted(true, "default")
+
+        assertFalse(plan.reloadsWhileTyping(true, "Stable", listOf("default", "stable")))
+    }
+
+    @Test
+    fun `before the branches are known typing never reloads`() {
+        assertFalse(plan.reloadsWhileTyping(true, "stable", emptyList()))
+    }
+
+    @Test
+    fun `typing the loaded branch does not reload`() {
+        plan.loadStarted(true, "stable")
+
+        assertFalse(plan.reloadsWhileTyping(true, "stable", listOf("default", "stable")))
+    }
+
+    @Test
+    fun `typing in a mode without the branch field never reloads`() {
+        assertFalse(plan.reloadsWhileTyping(false, "stable", listOf("stable")))
+    }
 }

@@ -2,10 +2,10 @@ package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.diff.HgDiffTabManager
 import com.narzaru.mercurial.diff.NavigationHistory
-import com.narzaru.mercurial.hg.HgActiveBranches
 import com.narzaru.mercurial.hg.HgCommandRunner
 import com.narzaru.mercurial.hg.HgContentHash
 import com.narzaru.mercurial.hg.HgFailure
+import com.narzaru.mercurial.hg.HgOpenBranches
 import com.narzaru.mercurial.hg.HgPaths
 import com.narzaru.mercurial.hg.HgResult
 import com.narzaru.mercurial.hg.HgSettings
@@ -44,7 +44,6 @@ import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.util.Computable
 import com.intellij.openapi.util.Condition
@@ -63,7 +62,6 @@ import com.intellij.openapi.vfs.newvfs.events.VFilePropertyChangeEvent
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ex.ToolWindowEx
 import com.intellij.ui.ClickListener
-import com.intellij.ui.CollectionComboBoxModel
 import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.components.JBLabel
@@ -89,7 +87,6 @@ import java.util.Collections
 import java.util.WeakHashMap
 import javax.swing.AbstractAction
 import javax.swing.BoxLayout
-import javax.swing.ComboBoxEditor
 import javax.swing.Icon
 import javax.swing.JComboBox
 import javax.swing.JComponent
@@ -101,11 +98,8 @@ import javax.swing.ListSelectionModel
 import javax.swing.SwingConstants
 import javax.swing.ToolTipManager
 import javax.swing.event.DocumentEvent
-import javax.swing.event.PopupMenuEvent
-import javax.swing.event.PopupMenuListener
 import javax.swing.table.TableCellRenderer
 import javax.swing.table.TableColumn
-import javax.swing.text.JTextComponent
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.TreePath
 
@@ -165,11 +159,9 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
     private val filterField = JBTextField()
     private val excludeField = JBTextField()
-    private val branchModel = CollectionComboBoxModel<String>()
-    private val branchCombo = ComboBox(branchModel)
+    private val branchField = BranchField(::onBranchTextChanged, ::reloadForBranch, ::fetchBranchChoices)
     private val branchReload = BranchReloadPlan()
     private val branchChoices = BranchChoices()
-    private var showingBranchChoices = false
     private val branchAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
     private val modeCombo = JComboBox(HgDisplayMode.entries.toTypedArray())
     private val branchLabel = JBLabel(" ")
@@ -391,49 +383,25 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         }
         modeRow.add(modeCombo, BorderLayout.CENTER)
 
-        branchHolder.add(branchCombo)
+        branchHolder.add(branchField)
         modeRow.add(branchHolder, BorderLayout.EAST)
-        configureBranchCombo()
+        configureBranchField()
         return modeRow
     }
 
-    private fun configureBranchCombo() {
-        branchCombo.isEditable = true
-        branchCombo.setMinimumAndPreferredWidth(JBUI.scale(BRANCH_COMBO_WIDTH))
-        branchCombo.toolTipText = "Branch or revision to compare against. The list shows the active branches."
-        val editorListener = object : DocumentAdapter() {
-            override fun textChanged(e: DocumentEvent) = onBranchTextChanged()
-        }
-        branchEditor()?.document?.addDocumentListener(editorListener)
-        branchCombo.addPropertyChangeListener("editor") { event ->
-            ((event.oldValue as? ComboBoxEditor)?.editorComponent as? JTextComponent)
-                ?.document?.removeDocumentListener(editorListener)
-            branchEditor()?.document?.addDocumentListener(editorListener)
-        }
-        branchCombo.addActionListener {
-            if (!showingBranchChoices && !branchCombo.isPopupVisible) reloadForBranch()
-        }
-        branchCombo.addPopupMenuListener(object : PopupMenuListener {
-            override fun popupMenuWillBecomeVisible(e: PopupMenuEvent) = fetchBranchChoices()
-            override fun popupMenuWillBecomeInvisible(e: PopupMenuEvent) {
-                if (!showingBranchChoices) onEdt { reloadForBranch() }
-            }
-
-            override fun popupMenuCanceled(e: PopupMenuEvent) = Unit
-        })
+    private fun configureBranchField() {
+        branchField.setMinimumAndPreferredWidth(JBUI.scale(BRANCH_FIELD_WIDTH))
+        branchField.toolTipText =
+            "Branch or revision to compare against. Type to filter default and the branches not merged into it."
     }
 
-    private fun branchEditor(): JTextComponent? = branchCombo.editor?.editorComponent as? JTextComponent
-
-    private fun branchText(): String = branchEditor()?.text ?: (branchCombo.selectedItem as? String).orEmpty()
+    private fun branchText(): String = branchField.text
 
     private fun setBranchText(text: String) {
-        branchModel.selectedItem = text
-        branchCombo.configureEditor(branchCombo.editor, text)
+        branchField.text = text
     }
 
     private fun onBranchTextChanged() {
-        if (showingBranchChoices) return
         triggerDebounce()
         scheduleBranchReload()
     }
@@ -441,7 +409,9 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun scheduleBranchReload() {
         if (!uiReady || branchAlarm.isDisposed) return
         branchAlarm.cancelAllRequests()
-        branchAlarm.addRequest({ reloadForBranch() }, BRANCH_RELOAD_DEBOUNCE_MS)
+        if (branchReload.reloadsWhileTyping(displayMode.usesBranchField, branchText(), branchChoices.names)) {
+            branchAlarm.addRequest({ reloadForBranch() }, BRANCH_RELOAD_DEBOUNCE_MS)
+        }
     }
 
     private fun reloadForBranch() {
@@ -460,31 +430,17 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             try {
                 val repoRoot = loadedRoot ?: HgCommandRunner.findRepoRoot(start)
                 if (repoRoot != null) {
-                    val result = HgCommandRunner(repoRoot).runToText(HgActiveBranches.ARGUMENTS)
-                    if (result.success) names = HgActiveBranches.parse(result.stdout)
+                    val result = HgCommandRunner(repoRoot).runToText(HgOpenBranches.ARGUMENTS)
+                    if (result.success) names = HgOpenBranches.parse(result.stdout)
                     else LOG.warn("Branches are unavailable: ${HgFailure.message(result)}")
                 }
             } finally {
                 val fetched = names
-                onEdt { if (branchChoices.fetched(stamp, fetched)) showBranchChoices() }
+                onEdt {
+                    branchChoices.fetched(stamp, fetched)
+                    if (fetched != null) branchField.setChoices(branchChoices.names)
+                }
             }
-        }
-    }
-
-    private fun showBranchChoices() {
-        val text = branchText()
-        val popupOpen = branchCombo.isPopupVisible
-        showingBranchChoices = true
-        try {
-            branchModel.selectedItem = text
-            branchModel.replaceAll(branchChoices.names)
-            if (branchText() != text) setBranchText(text)
-            if (popupOpen) {
-                branchCombo.hidePopup()
-                branchCombo.showPopup()
-            }
-        } finally {
-            showingBranchChoices = false
         }
     }
 
@@ -838,7 +794,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
     private fun updateBranchFieldVisibility() {
         val custom = displayMode.usesBranchField
-        branchCombo.isVisible = custom
+        branchField.isVisible = custom
         branchHolder.isVisible = custom
         modeRow.revalidate()
         modeRow.repaint()
@@ -1528,7 +1484,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
         const val BRANCH_RELOAD_DEBOUNCE_MS = 700
 
-        const val BRANCH_COMBO_WIDTH = 160
+        const val BRANCH_FIELD_WIDTH = 160
 
         const val SELECTION_DEBOUNCE_MS = 250
 
