@@ -29,6 +29,8 @@ class RevisionsBar(
 
     private var shownNodes: List<String> = emptyList()
 
+    private var moreThan: Int? = null
+
     init {
         header.componentStyle = UIUtil.ComponentStyle.SMALL
         resetLink.toolTipText = "Review the branch's own revisions and skip the merges"
@@ -47,7 +49,8 @@ class RevisionsBar(
         add(scroll, BorderLayout.CENTER)
     }
 
-    fun update(revisions: List<HgRevision>, selection: RevisionSelection) {
+    fun update(revisions: List<HgRevision>, selection: RevisionSelection, moreThan: Int? = null) {
+        this.moreThan = moreThan
         val nodes = revisions.map { it.node }
         if (nodes != shownNodes) {
             shownNodes = nodes
@@ -77,7 +80,7 @@ class RevisionsBar(
     }
 
     fun updateHeader(revisions: List<HgRevision>, selection: RevisionSelection) {
-        header.text = BranchRevisions.header(revisions, selection)
+        header.text = BranchRevisions.header(revisions, selection, moreThan)
         resetLink.isVisible = revisions.isNotEmpty() && !selection.isDefaultFor(revisions)
     }
 

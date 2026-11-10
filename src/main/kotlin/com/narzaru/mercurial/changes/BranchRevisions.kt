@@ -122,7 +122,8 @@ object BranchRevisions {
     fun tooltip(revision: HgRevision): String =
         "${revision.rev}:${revision.node} · ${revision.author} · ${revision.date}\n${revision.summary}"
 
-    fun header(revisions: List<HgRevision>, selection: RevisionSelection): String {
+    fun header(revisions: List<HgRevision>, selection: RevisionSelection, moreThan: Int? = null): String {
+        if (moreThan != null) return "Revisions: more than $moreThan"
         if (revisions.isEmpty()) return "Revisions: none"
         val selected = revisions.count { selection.isSelected(it) }
         val custom = if (selection.isDefaultFor(revisions)) "" else " (custom)"

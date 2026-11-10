@@ -23,7 +23,9 @@ data class ChangesResult(
 
     val statsPaths: Map<DiffRange, List<String>> = emptyMap(),
 
-    val currentInfo: String = ""
+    val currentInfo: String = "",
+
+    val revisionsMoreThan: Int? = null
 ) {
 
     companion object {
@@ -41,6 +43,7 @@ data class ChangesResult(
 class ChangesLoader(
     private val commands: HgCommands,
     private val jobs: ParallelJobs,
+    private val branchSize: BranchSizeGuard,
     private val revisionOverrides: (String) -> List<String>,
     private val warn: (String) -> Unit
 ) {
@@ -77,6 +80,10 @@ class ChangesLoader(
             RevisionSelection.fromStorage(revisionOverrides(branch))
         } else {
             RevisionSelection.DEFAULT
+        }
+        if (usesRevisions && head.branchTooLarge) {
+            return ChangesResult.failure(branchSize.tooLargeText(branch, mode), ".", branch, revisions, selection)
+                .copy(revisionsMoreThan = branchSize.limit)
         }
         val selectedNodes = selection.selectedNodes(revisions)
 
@@ -287,6 +294,7 @@ class ChangesLoader(
     private class HeadQueries(
         val branch: String,
         val revisions: List<HgRevision>,
+        val branchTooLarge: Boolean,
         val currentInfo: String,
         val baseInfo: String?
     )
@@ -297,7 +305,7 @@ class ChangesLoader(
         trace: LoadTrace? = null
     ): HeadQueries {
         var branch = ""
-        var revisions = emptyList<HgRevision>()
+        var revisions = BranchRevisionsRead(emptyList(), tooLarge = false)
         var currentInfo = ""
         var baseInfo: String? = null
         val queries = ArrayList<() -> Unit>()
@@ -309,7 +317,7 @@ class ChangesLoader(
         if (earlyTargetRev != null) queries.add { baseInfo = revisionInfo(earlyTargetRev) }
 
         trace.timed("head queries") { jobs.map(queries) { it() } }
-        return HeadQueries(branch, revisions, currentInfo, baseInfo)
+        return HeadQueries(branch, revisions.revisions, revisions.tooLarge, currentInfo, baseInfo)
     }
 
     private fun revisionInfo(rev: String): String =
@@ -321,11 +329,9 @@ class ChangesLoader(
         return if (r.success) r.stdout.trim() else ""
     }
 
-    private fun branchRevisions(): List<HgRevision> {
-        val r = commands.run(
-            "log", "-r", BranchRevisions.OWN_REVS, "--template", BranchRevisions.TEMPLATE + "\\n"
-        )
-        return if (r.success) BranchRevisions.parse(r.stdout) else emptyList()
+    private fun branchRevisions(): BranchRevisionsRead {
+        val r = commands.run(branchSize.logArgs())
+        return branchSize.read(if (r.success) BranchRevisions.parse(r.stdout) else emptyList())
     }
 
     private fun inScope(item: HgFileItem, scope: Set<String>): Boolean =

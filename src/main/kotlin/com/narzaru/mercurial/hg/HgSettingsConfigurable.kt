@@ -5,6 +5,10 @@ import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.ConfigurationException
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.ui.ComboBox
+import com.intellij.ui.components.JBTextField
+import com.intellij.ui.dsl.builder.COLUMNS_TINY
+import com.intellij.ui.dsl.builder.RightGap
+import com.intellij.ui.dsl.builder.columns
 import com.intellij.ui.dsl.builder.panel
 import com.narzaru.mercurial.changes.HgChangesService
 import com.narzaru.mercurial.model.ChangesetsFragments
@@ -37,7 +41,9 @@ class HgSettingsConfigurable : Configurable {
         addActionListener { serverCountSpinner.isEnabled = isSelected }
     }
 
-    private val fragmentsCombo = ComboBox(ChangesetsFragments.entries.toTypedArray()).apply {
+    private val branchLimitField = JBTextField()
+
+    private val fragmentsCombo =ComboBox(ChangesetsFragments.entries.toTypedArray()).apply {
         addActionListener { toolTipText = (selectedItem as? ChangesetsFragments)?.hint }
     }
 
@@ -88,6 +94,16 @@ class HgSettingsConfigurable : Configurable {
                         "of them. Raise this to trade about 45 MB per process for that parallelism."
                 )
         }
+        row("Largest branch for Base and Changesets modes:") {
+            cell(branchLimitField)
+                .columns(COLUMNS_TINY)
+                .gap(RightGap.SMALL)
+            label("revisions (0 = no limit)")
+        }.rowComment(
+            "Both modes walk every revision of the branch. A larger branch — <code>default</code> or " +
+                "a long-lived release branch — is not loaded in them; <b>Uncommitted</b> and " +
+                "<b>Merge</b> are not limited."
+        )
         group("Changesets Diff") {
             row {
                 text(
@@ -120,8 +136,11 @@ class HgSettingsConfigurable : Configurable {
     private fun selectedFragments(): ChangesetsFragments =
         fragmentsCombo.selectedItem as? ChangesetsFragments ?: HgSettings.changesetsFragments
 
+    private fun selectedBranchLimit(): Int? = HgSettings.branchLimitChoice(branchLimitField.text)
+
     override fun isModified(): Boolean =
         selectedEncoding() != HgSettings.fallbackEncoding ||
+            selectedBranchLimit() != HgSettings.largestBranch ||
             statusLetterCheck.isSelected != HgSettings.statusInTabs ||
             ignoreEolCheck.isSelected != HgSettings.ignoreEolChanges ||
             commandServerCheck.isSelected != HgSettings.useCommandServer ||
@@ -134,11 +153,15 @@ class HgSettingsConfigurable : Configurable {
         if (!HgSettings.isKnownCharset(encoding)) {
             throw ConfigurationException("Unknown encoding: $encoding")
         }
+        val branchLimit = selectedBranchLimit() ?: throw ConfigurationException(
+            "The largest branch must be a whole number of revisions, 0 or more: ${branchLimitField.text.trim()}"
+        )
 
         val statusChanged = statusLetterCheck.isSelected != HgSettings.statusInTabs
         val countingChanged = ignoreEolCheck.isSelected != HgSettings.ignoreEolChanges
         val changesetsChanged = widenCheck.isSelected != HgSettings.widenToFragments ||
             selectedFragments() != HgSettings.changesetsFragments
+        val branchLimitChanged = branchLimit != HgSettings.largestBranch
 
         if (commandServerCheck.isSelected != HgSettings.useCommandServer) {
             HgSettings.useCommandServer = commandServerCheck.isSelected
@@ -155,14 +178,17 @@ class HgSettingsConfigurable : Configurable {
         HgSettings.ignoreEolChanges = ignoreEolCheck.isSelected
         HgSettings.widenToFragments = widenCheck.isSelected
         HgSettings.changesetsFragments = selectedFragments()
+        HgSettings.largestBranch = branchLimit
 
-        if (statusChanged || countingChanged || changesetsChanged) {
+        if (statusChanged || countingChanged || changesetsChanged || branchLimitChanged) {
             for (project in ProjectManager.getInstance().openProjects) {
                 if (project.isDisposed) continue
                 if (statusChanged) project.serviceIfCreated<HgFileStatusService>()?.refreshOpenTabs()
-                if (countingChanged || changesetsChanged) {
-                    project.serviceIfCreated<HgChangesService>()
-                        ?.diffSettingsChanged(changesetsOnly = !countingChanged)
+                val changes = project.serviceIfCreated<HgChangesService>()
+                when {
+                    countingChanged -> changes?.diffSettingsChanged(changesetsOnly = false)
+                    branchLimitChanged -> changes?.branchLimitChanged()
+                    changesetsChanged -> changes?.diffSettingsChanged(changesetsOnly = true)
                 }
             }
         }
@@ -176,6 +202,7 @@ class HgSettingsConfigurable : Configurable {
         commandServerCheck.isSelected = HgSettings.useCommandServer
         serverCountSpinner.value = HgSettings.commandServerCount
         serverCountSpinner.isEnabled = HgSettings.useCommandServer
+        branchLimitField.text = HgSettings.largestBranch.toString()
         widenCheck.isSelected = HgSettings.widenToFragments
         fragmentsCombo.selectedItem = HgSettings.changesetsFragments
         fragmentsCombo.isEnabled = widenCheck.isSelected

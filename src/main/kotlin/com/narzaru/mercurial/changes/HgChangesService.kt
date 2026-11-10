@@ -33,6 +33,10 @@ class HgChangesService(val project: Project) {
         panel?.reloadForSettings(changesetsOnly)
     }
 
+    fun branchLimitChanged() {
+        panel?.reloadForBranchLimit()
+    }
+
     fun diffTabKeyOf(file: VirtualFile): String? = panel?.diffTabKeyOf(file)
 
     fun changesLoaded(): Boolean = panel?.isLoaded() == true

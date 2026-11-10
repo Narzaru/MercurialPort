@@ -3,6 +3,11 @@
 # Mercurial Port Changelog
 
 ## [Unreleased]
+### Added
+- **A limit on branch size for `Base` and `Changesets`.** A branch with more revisions than the
+  limit set in the settings, 100 by default, is not loaded in these modes; `Uncommitted` and
+  `Merge` still work for it. 0 turns the limit off.
+
 ### Changed
 - **The branch field in Hg Changes lists the repository's active branches**, those neither closed
   nor merged; any branch or revision can still be typed.

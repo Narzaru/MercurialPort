@@ -2,6 +2,7 @@ package com.narzaru.mercurial.hg
 
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.application.ApplicationManager
+import com.narzaru.mercurial.changes.BranchSizeGuard
 import com.narzaru.mercurial.model.ChangesetsFragments
 import java.nio.charset.Charset
 import kotlin.properties.ReadWriteProperty
@@ -16,6 +17,7 @@ object HgSettings {
     private const val STATUS_IN_TABS_KEY = "mercurial.statusInTabs"
     private const val COMMAND_SERVER_KEY = "mercurial.commandServer"
     private const val COMMAND_SERVER_COUNT_KEY = "mercurial.commandServerCount"
+    private const val LARGEST_BRANCH_KEY = "mercurial.largestBranchRevisions"
 
     private val flags = ArrayList<Flag>()
 
@@ -57,7 +59,15 @@ object HgSettings {
         set(value) = PropertiesComponent.getInstance()
             .setValue(COMMAND_SERVER_COUNT_KEY, boundCount(value), HgServerPool.DEFAULT_SERVERS)
 
+    var largestBranch: Int
+        get() = (properties()?.getInt(LARGEST_BRANCH_KEY, BranchSizeGuard.DEFAULT_LIMIT) ?: BranchSizeGuard.DEFAULT_LIMIT)
+            .coerceAtLeast(0)
+        set(value) = PropertiesComponent.getInstance()
+            .setValue(LARGEST_BRANCH_KEY, value.coerceAtLeast(0), BranchSizeGuard.DEFAULT_LIMIT)
+
     internal val flagDefaults: Map<String, Boolean> get() = flags.associate { it.key to it.default }
+
+    fun branchLimitChoice(input: String): Int? = input.trim().toIntOrNull()?.takeIf { it >= 0 }
 
     fun boundCount(value: Int): Int =
         value.coerceIn(HgServerPool.MIN_SERVERS, HgServerPool.MAX_SERVERS)

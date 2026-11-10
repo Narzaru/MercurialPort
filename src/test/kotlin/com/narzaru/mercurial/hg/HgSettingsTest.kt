@@ -4,6 +4,7 @@ import com.narzaru.mercurial.model.ChangesetsFragments
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -17,6 +18,18 @@ class HgSettingsTest {
         assertTrue(HgSettings.statusInTabs)
         assertEquals(ChangesetsFragments.PLATFORM_TRIMMED, HgSettings.changesetsFragments)
         assertEquals(HgServerPool.DEFAULT_SERVERS, HgSettings.commandServerCount)
+        assertEquals(100, HgSettings.largestBranch)
+    }
+
+    @Test
+    fun `the largest branch accepts a whole number of revisions, zero included`() {
+        assertEquals(250, HgSettings.branchLimitChoice(" 250 "))
+        assertEquals(0, HgSettings.branchLimitChoice("0"))
+        assertNull(HgSettings.branchLimitChoice("-1"))
+        assertNull(HgSettings.branchLimitChoice(""))
+        assertNull(HgSettings.branchLimitChoice("1.5"))
+        assertNull(HgSettings.branchLimitChoice("many"))
+        assertNull(HgSettings.branchLimitChoice("99999999999"))
     }
 
     @Test

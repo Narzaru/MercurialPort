@@ -488,6 +488,127 @@ class ChangesLoaderTest {
         assertTrue(result.files.none { it.path == "src/Late.kt" || it.path == "src/F5.kt" })
     }
 
+    private fun limitedRevisions(limit: Int) = listOf(
+        "log", "-r", "reverse(${BranchRevisions.OWN_REVS})", "-l", "${limit + 1}",
+        "--template", BranchRevisions.TEMPLATE + "\\n"
+    )
+
+    private fun newestFirst(log: String) = log.lines().asReversed().joinToString("\n")
+
+    private fun assertSameLoad(expected: ChangesResult, actual: ChangesResult) {
+        assertEquals(expected.revisions, actual.revisions)
+        assertEquals(expected.selection.selectedNodes(expected.revisions), actual.selection.selectedNodes(actual.revisions))
+        assertEquals(expected.targetRev, actual.targetRev)
+        assertEquals(expected.statusText, actual.statusText)
+        assertEquals(expected.error, actual.error)
+        assertEquals(expected.files, actual.files)
+        assertEquals(expected.statsRanges, actual.statsRanges)
+        assertEquals(expected.statsPaths, actual.statsPaths)
+        assertEquals(expected.revsByFile, actual.revsByFile)
+        assertNull(actual.revisionsMoreThan)
+    }
+
+    @Test
+    fun `changesets of a branch within the limit load exactly as without one`() {
+        val answers = mapOf(
+            currentBranch to ok("feature"),
+            currentRevision to ok("feature|abc123|Work in progress"),
+            baseRevision(branchPoint) to ok("default|def456|Parent work"),
+            changesetLog to ok("@n1\n>src/A.kt\n@n2\n>src/A.kt\n>src/B.kt"),
+            status("p1(n1)", "n2") to ok("M src/A.kt"),
+            status("p1(n2)", "n2") to ok("A src/B.kt")
+        )
+        val unlimited = FakeHg(answers + (branchRevisions to ok(revisionsLog)))
+        val limited = FakeHg(answers + (limitedRevisions(2) to ok(newestFirst(revisionsLog))))
+
+        val expected = load(unlimited, HgDisplayMode.CHANGESETS)
+        val actual = load(limited, HgDisplayMode.CHANGESETS, limit = 2)
+
+        assertEquals(unlimited.calls.map { if (it == branchRevisions) limitedRevisions(2) else it }, limited.calls)
+        assertSameLoad(expected, actual)
+        assertEquals(listOf("n1", "n2"), actual.revisions.map { it.node })
+    }
+
+    @Test
+    fun `the base mode of a branch within the limit keeps its overrides and branch point`() {
+        val selected = "(${SelectionRevsets.OWN_COMMITS}) - (node1)"
+        val ownFiles = listOf("log", "-r", selected, "--template", "{join(files, '\\n')}\\n")
+        val answers = mapOf(
+            currentBranch to ok("default"),
+            currentRevision to ok("default|abc123|Work 30"),
+            baseRevision("p1(node2)") to ok("|000000|"),
+            ownFiles to ok("src/A.kt"),
+            status("p1(node2)") to ok("M src/A.kt")
+        )
+        val overrides = { _: String -> listOf("node1=0") }
+        val unlimited = FakeHg(answers + (branchRevisions to ok(longLog)))
+        val limited = FakeHg(answers + (limitedRevisions(30) to ok(newestFirst(longLog))))
+
+        val expected = load(unlimited, HgDisplayMode.BRANCH, overrides = overrides)
+        val actual = load(limited, HgDisplayMode.BRANCH, overrides = overrides, limit = 30)
+
+        assertNull(actual.error)
+        assertEquals("p1(node2)", actual.targetRev)
+        assertSameLoad(expected, actual)
+    }
+
+    @Test
+    fun `changesets of a branch over the limit are refused before any further hg call`() {
+        val hg = FakeHg(
+            mapOf(
+                currentBranch to ok("default"),
+                limitedRevisions(1) to ok(newestFirst(revisionsLog)),
+                currentRevision to ok("default|abc123|Work in progress")
+            )
+        )
+        val result = load(hg, HgDisplayMode.CHANGESETS, limit = 1)
+
+        assertEquals(listOf(currentBranch, limitedRevisions(1), currentRevision), hg.calls)
+        assertEquals(
+            "Branch 'default' has more than 1 revisions, too many for 'Changesets'. " +
+                "Use 'Uncommitted' or 'Merge', or raise the limit in Settings → Tools → Mercurial Port.",
+            result.error
+        )
+        assertTrue(result.files.isEmpty())
+        assertTrue(result.revisions.isEmpty())
+        assertEquals("default", result.branch)
+        assertEquals(1, result.revisionsMoreThan)
+        assertEquals("abc123", result.currentInfo.split('|')[1])
+    }
+
+    @Test
+    fun `the base mode of a branch over the limit is refused before any further hg call`() {
+        val hg = FakeHg(
+            mapOf(
+                currentBranch to ok("default"),
+                limitedRevisions(29) to ok(newestFirst(longLog)),
+                currentRevision to ok("default|abc123|Work 30")
+            )
+        )
+        val result = load(hg, HgDisplayMode.BRANCH, limit = 29)
+
+        assertEquals(listOf(currentBranch, limitedRevisions(29), currentRevision), hg.calls)
+        assertTrue(result.error!!.startsWith("Branch 'default' has more than 29 revisions, too many for 'Base'."))
+        assertEquals(29, result.revisionsMoreThan)
+    }
+
+    @Test
+    fun `the limit leaves the merge mode alone`() {
+        val mergeBase = "max(ancestors(.) and branch('default'))"
+        val hg = FakeHg(
+            mapOf(
+                currentRevision to ok("feature|abc123|Work in progress"),
+                baseRevision(mergeBase) to ok("default|def456|Parent work"),
+                status(mergeBase) to ok("M src/A.kt")
+            )
+        )
+        val result = load(hg, HgDisplayMode.MERGE, customBranch = "default", limit = 1)
+
+        assertEquals(listOf(currentRevision, baseRevision(mergeBase), status(mergeBase)), hg.calls)
+        assertNull(result.error)
+        assertNull(result.revisionsMoreThan)
+    }
+
     private val changesetLog =
         listOf("log", "-r", SelectionRevsets.OWN_COMMITS,"--template", BranchRevisions.FILES_TEMPLATE)
 
@@ -499,8 +620,9 @@ class ChangesLoaderTest {
         mode: HgDisplayMode,
         customBranch: String = "",
         untracked: Boolean = false,
-        overrides: (String) -> List<String> = { emptyList() }
-    ): ChangesResult = ChangesLoader(hg, ParallelJobs(SameThreadLauncher), overrides, {})
+        overrides: (String) -> List<String> = { emptyList() },
+        limit: Int = 0
+    ): ChangesResult = ChangesLoader(hg, ParallelJobs(SameThreadLauncher), BranchSizeGuard(limit), overrides, {})
         .load(mode, customBranch, untracked)
 
     private fun ok(stdout: String) = HgResult(0, stdout, "")

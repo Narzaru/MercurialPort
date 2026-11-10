@@ -239,6 +239,14 @@ class BranchRevisionsTest {
     }
 
     @Test
+    fun `header of a branch too large to load says only that it is over the limit`() {
+        assertEquals(
+            "Revisions: more than 100",
+            BranchRevisions.header(emptyList(), RevisionSelection.DEFAULT, moreThan = 100)
+        )
+    }
+
+    @Test
     fun `merge base is the newest parent branch revision the branch descends from`() {
         assertEquals(
             "max(ancestors(.) and branch('default'))",

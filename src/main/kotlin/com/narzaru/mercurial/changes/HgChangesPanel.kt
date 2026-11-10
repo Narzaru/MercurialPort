@@ -125,6 +125,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     val diffSource = ChangesDiffSource(project)
 
     private var branchRevisions: List<HgRevision> = emptyList()
+    private var branchRevisionsMoreThan: Int? = null
     private var revisionsState = RevisionsState()
     private var revisionsVisible = true
 
@@ -789,7 +790,8 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
     private fun updateRevisionsBarVisibility() {
         revisionsBar.isVisible = revisionsVisible && displayMode.usesRevisions &&
-            branchRevisions.isNotEmpty() && RevisionsSync.isBranchKnown(revisionsState.branch)
+            (branchRevisions.isNotEmpty() || branchRevisionsMoreThan != null) &&
+            RevisionsSync.isBranchKnown(revisionsState.branch)
         revalidate()
         repaint()
     }
@@ -811,7 +813,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun resetRevisions() {
         revisionsState = revisionsState.copy(selection = RevisionSelection.DEFAULT)
         storeRevisionOverrides(emptyList())
-        revisionsBar.update(branchRevisions, revisionsState.selection)
+        revisionsBar.update(branchRevisions, revisionsState.selection, branchRevisionsMoreThan)
         scheduleRevisionsRefresh()
     }
 
@@ -908,6 +910,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                 val result = ChangesLoader(
                     HgCommands.of(HgCommandRunner(repoRoot, trace)),
                     jobs,
+                    BranchSizeGuard(HgSettings.largestBranch),
                     settings::revisionOverrides,
                     LOG::warn
                 ).load(mode, customBranch, untracked, trace)
@@ -957,7 +960,8 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun applyBranchRevisions(result: ChangesResult) {
         revisionsState = RevisionsSync.afterLoad(revisionsState, result.branch, result.selection)
         branchRevisions = result.revisions
-        revisionsBar.update(branchRevisions, revisionsState.selection)
+        branchRevisionsMoreThan = result.revisionsMoreThan
+        revisionsBar.update(branchRevisions, revisionsState.selection, branchRevisionsMoreThan)
         dropOverridesOfGoneRevisions(result.branch, result.revisions)
     }
 
@@ -1405,6 +1409,8 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         if (changesetsOnly && !displayMode.isChangesets) return
         onEdt { refresh() }
     }
+
+    fun reloadForBranchLimit() = onEdt { if (displayMode.usesRevisions) refresh() }
 
     fun loadForRequestedDiff() = onEdt { if (!busy && !isLoaded()) refresh() }
 

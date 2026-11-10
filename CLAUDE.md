@@ -65,7 +65,8 @@
   не попадает, его хэш — хэш содержимого с диска (`HgContentHash`, префикс `c:`, выбор файлов —
   `DiffStatsPlan.isHashedByContent`, частичный пересчёт без запуска `hg` — `PartialStatsPlan`);
 - состояние окна изменений — `PathFilter`, `ChangesSettings`, `StatusTextFormatter`, `BranchScope`,
-  `BranchRevisions`, revset выбранных ревизий — `SelectionRevsets`, выбор строки открытого файла —
+  `BranchRevisions`, revset выбранных ревизий — `SelectionRevsets`, отказ от слишком больших веток
+  (по числу ревизий, без лишнего запуска `hg`) — `BranchSizeGuard`, выбор строки открытого файла —
   `OpenedFileRow`, ключи файлов — `FileKeys`, LRU хранимого — `RecentKeys`, `RevisionOverrides`;
 - поле ветки — `BranchReloadPlan` (когда перезагружать при вводе), `BranchChoices` (когда заново
   спрашивать список), `HgActiveBranches` (разбор `hg branches`);
