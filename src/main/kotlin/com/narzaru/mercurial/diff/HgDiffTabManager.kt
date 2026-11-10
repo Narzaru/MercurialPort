@@ -39,12 +39,11 @@ class HgDiffTabManager(private val project: Project) : Disposable {
     override fun dispose() {
     }
 
-    fun sourcePathOf(file: VirtualFile): String? = (file as? HgDiffVirtualFile)?.sourcePath
-
-    private fun tabFor(key: String, title: String, sourcePath: String?, chain: () -> DiffRequestChain) =
-        synchronized(tabs) {
-            tabs.getOrPut(key) { HgDiffVirtualFile(chain(), title, sourcePath) }
-        }
+    fun sourcePathOf(file: VirtualFile): String? = when {
+        file.isDirectory -> null
+        file.isInLocalFileSystem -> file.path
+        else -> (file as? HgDiffVirtualFile)?.sourcePath
+    }
 
     fun openTab(
         key: String,
@@ -53,8 +52,24 @@ class HgDiffTabManager(private val project: Project) : Disposable {
         focusBack: Component?,
         requestFocus: Boolean = false,
         chain: () -> DiffRequestChain
+    ) = open(HgDiffTabKeys.changes(key), title, sourcePath, focusBack, requestFocus, chain)
+
+    fun show(key: String, title: String, request: DiffRequest, focusBack: Component?, sourcePath: String?) =
+        open(HgDiffTabKeys.history(key), title, sourcePath, focusBack, requestFocus = false) {
+            SimpleDiffRequestChain(listOf(request))
+        }
+
+    private fun open(
+        tabKey: String,
+        title: String,
+        sourcePath: String?,
+        focusBack: Component?,
+        requestFocus: Boolean,
+        chain: () -> DiffRequestChain
     ) {
-        val diffFile = tabFor(HgDiffTabKeys.changes(key), title, sourcePath, chain)
+        val diffFile = synchronized(tabs) {
+            tabs.getOrPut(tabKey) { HgDiffVirtualFile(chain(), title, sourcePath) }
+        }
         project.service<HgFileHistoryService>().suppressFollow {
             showTab(diffFile, requestFocus)
         }
@@ -87,22 +102,6 @@ class HgDiffTabManager(private val project: Project) : Disposable {
         }, project.disposed)
     }
 
-    fun show(
-        key: String,
-        title: String,
-        request: DiffRequest,
-        focusBack: Component? = null,
-        sourcePath: String? = null
-    ) {
-        val diffFile = tabFor(HgDiffTabKeys.history(key), title, sourcePath) {
-            SimpleDiffRequestChain(listOf(request))
-        }
-        project.service<HgFileHistoryService>().suppressFollow {
-            showTab(diffFile)
-        }
-        restoreFocus(focusBack)
-    }
-
     private fun restoreFocus(component: Component?) {
         if (component == null) return
         ApplicationManager.getApplication().invokeLater({
@@ -113,7 +112,7 @@ class HgDiffTabManager(private val project: Project) : Disposable {
         }, project.disposed)
     }
 
-    private fun showTab(diffFile: VirtualFile, requestFocus: Boolean = false) {
+    private fun showTab(diffFile: VirtualFile, requestFocus: Boolean) {
         if (!opensAsEditorTab()) {
             DiffEditorTabFilesManager.getInstance(project).showDiffFile(diffFile, requestFocus)
             return

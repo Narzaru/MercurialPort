@@ -9,9 +9,7 @@ object TodoScan {
         signature(previous) != signature(current)
 
     fun covers(files: List<HgFileItem>, repoRoot: String, changedPath: String): Boolean {
-        val root = HgPaths.normalize(repoRoot).trimEnd('/')
-        val relative = HgPaths.relativize(HgPaths.normalize(changedPath), root) ?: return false
-        val key = HgPaths.key(relative)
+        val key = FileKeys.relativeTo(repoRoot, changedPath) ?: return false
         return files.any { HgPaths.key(it.path) == key }
     }
 

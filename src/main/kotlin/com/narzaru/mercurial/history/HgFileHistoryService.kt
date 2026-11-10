@@ -1,10 +1,9 @@
 package com.narzaru.mercurial.history
 
 import com.intellij.openapi.components.Service
-import com.intellij.openapi.project.Project
 
 @Service(Service.Level.PROJECT)
-class HgFileHistoryService(project: Project) {
+class HgFileHistoryService {
     var panel: HgFileHistoryPanel? = null
 
     fun syncTo(path: String) {

@@ -6,7 +6,6 @@ import com.intellij.openapi.progress.ProcessCanceledException
 import java.io.File
 import java.io.InputStream
 import java.util.concurrent.Future
-import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 
 data class HgResult(
@@ -67,77 +66,39 @@ class HgCommandRunner(private val workDir: File, private val watch: HgCallWatch?
     private fun execOnServer(args: List<String>): HgBytesResult? {
         if (!HgSettings.useCommandServer || !HgServableCommands.isServable(args)) return null
         val servers = HgCommandServers.getInstanceOrNull() ?: return null
-        val lease = leaseOrNull(servers, args) ?: return null
-        val call = HgAwait.start(CALL_THREAD) { lease.server.run(args) }
-        var settlement = Settlement.DISCARD
-        try {
-            val response = HgAwait.finish(call)
-            if (response == null) {
+        return when (val call = servers.call(workDir, args)) {
+            is HgServerCall.Answered -> HgBytesResult(
+                call.response.exitCode,
+                call.response.stdout,
+                HgOutputDecoder.decode(call.response.stderr)
+            )
+            HgServerCall.TimedOut -> {
                 LOG.warn("${describe(args)} was left unfinished by the command server after $TIMEOUT_SECONDS s")
-                return HgBytesResult(TIMEOUT_EXIT_CODE, ByteArray(0), timedOutMessage(args))
+                timedOut(args)
             }
-            settlement = Settlement.RELEASE
-            return HgBytesResult(response.exitCode, response.stdout, HgOutputDecoder.decode(response.stderr))
-        } catch (e: ProcessCanceledException) {
-            settlement = Settlement.DRAIN
-            throw e
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            return canceled(args)
-        } catch (e: Exception) {
-            LOG.info("${describe(args)} is being run as a plain process: ${e.message}")
-            return null
-        } finally {
-            settle(settlement, lease, call)
+            HgServerCall.Interrupted -> canceled(args)
+            HgServerCall.Unavailable -> null
+            is HgServerCall.Failed -> {
+                LOG.info("${describe(args)} is being run as a plain process: ${call.reason}")
+                null
+            }
         }
     }
 
-    private fun settle(
-        settlement: Settlement,
-        lease: HgServerLease,
-        call: FutureTask<HgServerResponse>
-    ) = when (settlement) {
-        Settlement.RELEASE -> lease.release()
-        Settlement.DISCARD -> lease.discard()
-        Settlement.DRAIN -> drainThenSettle(lease, call)
-    }
-
-    private fun drainThenSettle(lease: HgServerLease, call: FutureTask<HgServerResponse>) {
-        HgAwait.start(DRAIN_THREAD) {
-            val drained = runCatching { call.get(HgAwait.TIMEOUT_SECONDS, TimeUnit.SECONDS) }.isSuccess
-            if (drained) lease.release() else lease.discard()
-        }
-    }
-
-    private fun leaseOrNull(servers: HgCommandServers, args: List<String>): HgServerLease? = try {
-        servers.lease(workDir)
+    private fun execToResult(args: List<String>): HgBytesResult = try {
+        exec(args)
     } catch (e: ProcessCanceledException) {
         throw e
     } catch (e: InterruptedException) {
         Thread.currentThread().interrupt()
-        null
+        canceled(args)
     } catch (e: Exception) {
-        LOG.info("${describe(args)} is being run as a plain process: ${e.message}")
-        null
+        val message = e.message ?: e.toString()
+        LOG.warn("${describe(args)} could not be started: $message", e)
+        HgFailureKind.NOT_STARTED.result(message)
     }
 
-    private fun execToResult(args: List<String>): HgBytesResult {
-        return try {
-            val output = exec(args)
-            HgBytesResult(output.exitCode, output.stdout, HgOutputDecoder.decode(output.stderr))
-        } catch (e: ProcessCanceledException) {
-            throw e
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            canceled(args)
-        } catch (e: Exception) {
-            val message = e.message ?: e.toString()
-            LOG.warn("${describe(args)} could not be started: $message", e)
-            HgBytesResult(FAILED_EXIT_CODE, ByteArray(0), message, failedToStart = true)
-        }
-    }
-
-    private fun exec(args: List<String>): ProcessOutput {
+    private fun exec(args: List<String>): HgBytesResult {
         val process = GeneralCommandLine(listOf(HG) + args)
             .withEnvironment(PLAIN_ENVIRONMENT)
             .withWorkingDirectory(workDir.toPath())
@@ -149,13 +110,9 @@ class HgCommandRunner(private val workDir: File, private val watch: HgCallWatch?
             if (!awaitExit(process)) {
                 process.destroyForcibly()
                 LOG.warn("${describe(args)} was killed after $TIMEOUT_SECONDS s without finishing")
-                return ProcessOutput(
-                    TIMEOUT_EXIT_CODE,
-                    ByteArray(0),
-                    timedOutMessage(args).toByteArray()
-                )
+                return timedOut(args)
             }
-            return ProcessOutput(process.exitValue(), collect(stdout), collect(stderr))
+            return HgBytesResult(process.exitValue(), collect(stdout), HgOutputDecoder.decode(collect(stderr)))
         } finally {
             if (process.isAlive) process.destroyForcibly()
         }
@@ -188,27 +145,20 @@ class HgCommandRunner(private val workDir: File, private val watch: HgCallWatch?
     private fun describe(args: List<String>): String = (listOf(HG) + args).joinToString(" ")
 
     private fun canceled(args: List<String>): HgBytesResult =
-        HgBytesResult(FAILED_EXIT_CODE, ByteArray(0), "'${describe(args)}' was canceled before it finished.")
+        HgFailureKind.CANCELED.result("'${describe(args)}' was canceled before it finished.")
 
-    private fun timedOutMessage(args: List<String>): String =
+    private fun timedOut(args: List<String>): HgBytesResult = HgFailureKind.TIMED_OUT.result(
         "'${describe(args)}' did not finish within $TIMEOUT_SECONDS seconds and was terminated. " +
             "Mercurial may be waiting for input or for a lock in $workDir."
-
-    private enum class Settlement { RELEASE, DISCARD, DRAIN }
+    )
 
     private class Outcome(val result: HgBytesResult, val viaServer: Boolean)
 
-    private class ProcessOutput(val exitCode: Int, val stdout: ByteArray, val stderr: ByteArray)
-
     companion object {
         private const val HG = "hg"
-        private const val CALL_THREAD = "hg command server call"
-        private const val DRAIN_THREAD = "hg command server drain"
         private const val TIMEOUT_SECONDS = HgAwait.TIMEOUT_SECONDS
         private const val POLL_MILLIS = 100L
         private const val READ_TAIL_SECONDS = 30L
-        const val FAILED_EXIT_CODE = -1
-        const val TIMEOUT_EXIT_CODE = -2
 
         internal val PLAIN_ENVIRONMENT = mapOf("HGPLAIN" to "1")
 

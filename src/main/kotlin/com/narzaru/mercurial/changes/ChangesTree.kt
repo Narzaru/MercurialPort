@@ -47,14 +47,14 @@ object ChangesTreeBuilder {
         isReviewed: (HgFileItem) -> Boolean
     ) {
         val byKey = HashMap<String, HgFileItem>(items.size)
-        for (item in items) byKey[TreeRefreshPlan.nodeKey(item)] = item
+        for (item in items) byKey[FileKeys.of(item)] = item
         replaceItems(root, byKey)
         aggregate(root, "", isReviewed, UnreviewedDirs.of(scope, isReviewed))
     }
 
     private fun replaceItems(node: DefaultMutableTreeNode, byKey: Map<String, HgFileItem>) {
         when (val payload = node.userObject) {
-            is FileNode -> byKey[TreeRefreshPlan.nodeKey(payload.item)]?.let {
+            is FileNode -> byKey[FileKeys.of(payload.item)]?.let {
                 node.userObject = FileNode(it)
             }
             is DirNode -> for (i in 0 until node.childCount) {

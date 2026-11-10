@@ -3,11 +3,9 @@ package com.narzaru.mercurial.changes
 import com.narzaru.mercurial.diff.HgDiffTabManager
 import com.narzaru.mercurial.diff.NavigationHistory
 import com.narzaru.mercurial.hg.HgCommandRunner
-import com.narzaru.mercurial.hg.HgContentCache
 import com.narzaru.mercurial.hg.HgContentHash
 import com.narzaru.mercurial.hg.HgDiffStatParser
 import com.narzaru.mercurial.hg.HgFailure
-import com.narzaru.mercurial.model.ChangesetsFragments
 import com.narzaru.mercurial.hg.HgPaths
 import com.narzaru.mercurial.hg.HgResult
 import com.narzaru.mercurial.hg.HgSettings
@@ -18,14 +16,6 @@ import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
 import com.narzaru.mercurial.model.HgListMode
 import com.narzaru.mercurial.status.HgFileStatusService
-import com.intellij.diff.DiffContentFactory
-import com.intellij.diff.comparison.ComparisonManager
-import com.intellij.diff.comparison.ComparisonPolicy
-import com.intellij.diff.requests.SimpleDiffRequest
-import com.intellij.diff.tools.util.base.TextDiffSettingsHolder
-import com.intellij.diff.util.DiffUserDataKeys
-import com.intellij.diff.util.Side
-import com.intellij.openapi.progress.DumbProgressIndicator
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
@@ -47,8 +37,6 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
-import com.intellij.openapi.fileTypes.FileType
-import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.guessProjectDir
@@ -94,7 +82,6 @@ import java.awt.event.MouseEvent
 import java.io.File
 import java.util.Collections
 import java.util.WeakHashMap
-import java.util.concurrent.ConcurrentHashMap
 import javax.swing.AbstractAction
 import javax.swing.BoxLayout
 import javax.swing.Icon
@@ -126,9 +113,10 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private var lastActivatedPath = ""
 
     @Volatile
-    private var comparison = ComparisonState()
+    var comparison = ComparisonState()
+        private set
 
-    private val partialDiff = ConcurrentHashMap<String, Int>()
+    val diffSource = ChangesDiffSource(project)
 
     private var branchRevisions: List<HgRevision> = emptyList()
     private var revisionsState = RevisionsState()
@@ -178,19 +166,6 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private val revisionsAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
 
     private val selectionAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
-
-    @Volatile
-    private var prefetchId = 0
-
-    private val baseContentCache = HgContentCache()
-
-    private val lineComparator = object : LineComparator {
-        override fun changedLines(left: String, right: String): List<DiffFragment> =
-            compareLines(left, right, ComparisonPolicy.DEFAULT)
-
-        override fun fragmentLines(left: String, right: String): List<DiffFragment> =
-            compareLines(left, right, fragmentPolicy())
-    }
 
     private var refreshId = 0
 
@@ -271,18 +246,20 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     }
 
     private fun activateRow(row: Int) {
-        activateItem((nodeAt(row)?.userObject as? FileNode)?.item ?: return)
+        activateItem(itemAt(row) ?: return)
     }
 
     private fun activateKey(key: String) {
         if (tree.selectedRowCount > 1) return
-        val row = (0 until tree.rowCount).firstOrNull { keyAtRow(it) == key } ?: return
+        val row = rowOf(key) ?: return
         if (!tree.selectionModel.isSelectedIndex(row)) return
         activateRow(row)
     }
 
-    private fun keyAtRow(row: Int): String? =
-        (nodeAt(row)?.userObject as? FileNode)?.item?.let { FileKeys.of(it) }
+    private fun itemAt(row: Int): HgFileItem? = (nodeAt(row)?.userObject as? FileNode)?.item
+
+    private fun rowOf(fileKey: String): Int? =
+        (0 until tree.rowCount).firstOrNull { row -> itemAt(row)?.let { FileKeys.of(it) } == fileKey }
 
     private fun activateItem(item: HgFileItem) {
         lastActivatedPath = HgPaths.key(item.path)
@@ -293,13 +270,12 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         prefetchAround(item)
     }
 
-    private fun visibleFiles(): List<HgFileItem> = (0 until tree.rowCount)
-        .mapNotNull { (nodeAt(it)?.userObject as? FileNode)?.item }
+    private fun visibleFiles(): List<HgFileItem> = (0 until tree.rowCount).mapNotNull { itemAt(it) }
 
     private fun onKeyboardSelection(row: Int) {
         if (!uiReady) return
         selectionAlarm.cancelAllRequests()
-        val item = (nodeAt(row)?.userObject as? FileNode)?.item ?: return
+        val item = itemAt(row) ?: return
         val key = FileKeys.of(item)
         selectionAlarm.addRequest({ activateKey(key) }, SELECTION_DEBOUNCE_MS)
     }
@@ -330,9 +306,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun selectOpenedFile(filePath: String) {
         val repoRoot = comparison.repoRoot ?: return
         val key = HgPaths.keyRelativeTo(filePath, repoRoot) ?: return
-        val rowKeys = (0 until tree.rowCount).map { row ->
-            (nodeAt(row)?.userObject as? FileNode)?.item?.let { HgPaths.key(it.path) }
-        }
+        val rowKeys = (0 until tree.rowCount).map { row -> itemAt(row)?.let { HgPaths.key(it.path) } }
         val target = OpenedFileRow.of(rowKeys, tree.selectedRows.toSet(), key)
         if (target == null) {
             tree.selectionModel.clearSelection()
@@ -640,6 +614,8 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun selectedNodes(): List<DefaultMutableTreeNode> =
         tree.selectedRows.toList().mapNotNull { nodeAt(it) }
 
+    private fun selectedFiles(): List<HgFileItem> = selectedNodes().flatMap { ChangesTreeBuilder.filesOf(it) }
+
     private fun handleClick(e: MouseEvent, clickCount: Int) {
         if (e.button != MouseEvent.BUTTON1) return
         val viewRow = tree.rowAtPoint(e.point)
@@ -803,10 +779,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     }
 
     private fun toggleReviewedForSelection() {
-        val items = selectedNodes()
-            .flatMap { ChangesTreeBuilder.filesOf(it) }
-            .distinctBy { review.key(it) }
-        if (review.toggle(items)) renderReviewMarks()
+        if (review.toggle(selectedFiles().distinctBy { review.key(it) })) renderReviewMarks()
     }
 
     private fun clearReviewed() {
@@ -869,46 +842,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                 ).load(mode, customBranch, untracked, trace)
 
                 onEdt {
-                    if (requestId != refreshId) return@onEdt
-                    comparison = ComparisonState(repoRoot, result.targetRev, mode, result.revsByFile)
-                    knownRepoState = RepoState.parse(result.currentInfo)
-                    review.startLoad(
-                        knownRepoState.takeIf { it.isKnown }?.branch.orEmpty(),
-                        "${mode.name}|${result.targetRev}"
-                    )
-                    prefetchId++
-                    baseContentCache.clear()
-                    partialDiff.clear()
-                    lastActivatedPath = ""
-                    if (mode.usesRevisions) {
-                        revisionsState = RevisionsSync.afterLoad(revisionsState, result.branch, result.selection)
-                        branchRevisions = result.revisions
-                        revisionsBar.update(branchRevisions, revisionsState.selection)
-                        dropOverridesOfGoneRevisions(result.branch, result.revisions)
-                    }
-                    updateRevisionsBarVisibility()
-                    sourceFiles.clear()
-                    if (result.error != null) {
-                        showStatus(result.error)
-                    } else {
-                        sourceFiles.addAll(result.files)
-                        showStatus(result.statusText)
-                    }
-                    trace.timed("publish statuses") { publishStatuses() }
-                    if (listMode == HgListMode.TODO) scanTodos(trace) else renderFiltered(trace)
-                    trace.timed("reload open diffs") {
-                        val signature = comparisonSignature()
-                        if (signature != lastComparison) {
-                            lastComparison = signature
-                            project.service<HgChangesService>().reloadOpenDiffs()
-                        }
-                    }
-                    openRequestedDiff()
-                    if (result.error == null && result.files.isNotEmpty()) {
-                        loadDiffStats(repoRoot, result.targetRev, result.statsRanges, result.statsPaths, trace)
-                    } else {
-                        report(trace)
-                    }
+                    if (requestId == refreshId) applyLoad(repoRoot, mode, result, trace)
                 }
             } finally {
                 onEdt {
@@ -917,6 +851,57 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                 }
             }
         }
+    }
+
+    private fun applyLoad(repoRoot: File, mode: HgDisplayMode, result: ChangesResult, trace: LoadTrace?) {
+        startComparison(repoRoot, mode, result)
+        if (mode.usesRevisions) applyBranchRevisions(result)
+        updateRevisionsBarVisibility()
+        showLoadedFiles(result)
+        trace.timed("publish statuses") { publishStatuses() }
+        if (listMode == HgListMode.TODO) scanTodos(trace) else renderFiltered(trace)
+        trace.timed("reload open diffs") { reloadOpenDiffsIfComparisonChanged() }
+        openRequestedDiff()
+        if (result.error == null && result.files.isNotEmpty()) {
+            loadDiffStats(repoRoot, result.targetRev, result.statsRanges, result.statsPaths, trace)
+        } else {
+            report(trace)
+        }
+    }
+
+    private fun startComparison(repoRoot: File, mode: HgDisplayMode, result: ChangesResult) {
+        comparison = ComparisonState(repoRoot, result.targetRev, mode, result.revsByFile)
+        knownRepoState = RepoState.parse(result.currentInfo)
+        review.startLoad(
+            knownRepoState.takeIf { it.isKnown }?.branch.orEmpty(),
+            "${mode.name}|${result.targetRev}"
+        )
+        diffSource.invalidate()
+        lastActivatedPath = ""
+    }
+
+    private fun applyBranchRevisions(result: ChangesResult) {
+        revisionsState = RevisionsSync.afterLoad(revisionsState, result.branch, result.selection)
+        branchRevisions = result.revisions
+        revisionsBar.update(branchRevisions, revisionsState.selection)
+        dropOverridesOfGoneRevisions(result.branch, result.revisions)
+    }
+
+    private fun showLoadedFiles(result: ChangesResult) {
+        sourceFiles.clear()
+        if (result.error != null) {
+            showStatus(result.error)
+        } else {
+            sourceFiles.addAll(result.files)
+            showStatus(result.statusText)
+        }
+    }
+
+    private fun reloadOpenDiffsIfComparisonChanged() {
+        val signature = comparisonSignature()
+        if (signature == lastComparison) return
+        lastComparison = signature
+        project.service<HgChangesService>().reloadOpenDiffs()
     }
 
     private fun failLoad(status: String) {
@@ -933,7 +918,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         statsPending = false
         partialStatsId++
         partialStatsRunning = false
-        prefetchId++
+        diffSource.cancelPrefetch()
         pendingStatsKeys.clear()
         statsRanges = emptyList()
         statsPaths = emptyMap()
@@ -1188,7 +1173,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     }
 
     private fun selectedFileKeys(): Set<String> = tree.selectedRows.toList()
-        .mapNotNull { (nodeAt(it)?.userObject as? FileNode)?.item }
+        .mapNotNull { itemAt(it) }
         .map { HgPaths.key(it.path) }
         .toSet()
 
@@ -1196,7 +1181,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         if (keys.isEmpty()) return
         tree.selectionModel.clearSelection()
         for (row in 0 until tree.rowCount) {
-            val item = (nodeAt(row)?.userObject as? FileNode)?.item ?: continue
+            val item = itemAt(row) ?: continue
             if (HgPaths.key(item.path) in keys) tree.selectionModel.addSelectionInterval(row, row)
         }
     }
@@ -1469,70 +1454,9 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
     fun diffTabKeyOf(file: VirtualFile): String? = itemFor(file)?.let { HgPaths.key(it.path) }
 
-    fun buildDiffRequestForPath(path: String): SimpleDiffRequest? {
-        val state = comparison
-        val repoRoot = state.repoRoot ?: return null
-        val key = HgPaths.keyRelativeTo(path, repoRoot) ?: return null
-        val item = state.changedItemAt(key) ?: return null
-        val localFile = File(repoRoot, item.path)
-        val baseRev = item.baseRev.ifEmpty { state.baseRev }
-        return buildRequest(item, localFile, baseRev, computeSides(repoRoot, state, item, baseRev))
-    }
-
     private fun itemFor(file: VirtualFile): HgFileItem? {
         if (file.isDirectory || !file.isInLocalFileSystem) return null
-        val state = comparison
-        val repoRoot = state.repoRoot ?: return null
-        val key = HgPaths.keyRelativeTo(file.path, repoRoot) ?: return null
-        return state.changedItemAt(key)
-    }
-
-    private class Sides(
-        val base: String?,
-        val head: String?,
-        val onlyLast: Boolean = false,
-        val skippedHunks: Int = 0
-    )
-
-    private fun computeSides(repoRoot: File, state: ComparisonState, item: HgFileItem, baseRev: String): Sides {
-        val plan = DiffSidesPlan.of(item, baseRev)
-        val builder = baseBuilder(repoRoot, state)
-        var base = if (plan.needsBase) builder.readRevision(plan.baseRev, plan.basePath) else null
-        var head: String? = null
-        var onlyLast = false
-        if (plan.rightIsRevision) {
-            head = builder.readRevision(plan.headRev, plan.headPath)
-            val before = if (plan.needsBase) branchBase(builder, item, head) else null
-            if (plan.needsBase && before == null) {
-                onlyLast = true
-                base = builder.readRevision(plan.lastChangeBaseRev, plan.headPath)
-            } else {
-                base = before
-            }
-        }
-        return Sides(base, head, onlyLast, partialDiff[HgPaths.key(item.path)] ?: 0)
-    }
-
-    private fun baseBuilder(repoRoot: File, state: ComparisonState): BranchBaseBuilder = BranchBaseBuilder(
-        HgCommands.of(HgCommandRunner(repoRoot)),
-        baseContentCache,
-        state,
-        FragmentSettings(
-            HgSettings.widenToFragments,
-            HgSettings.changesetsFragments == ChangesetsFragments.HG,
-            changesetsStamp()
-        ),
-        lineComparator,
-        LOG::warn
-    )
-
-    private fun branchBase(builder: BranchBaseBuilder, item: HgFileItem, head: String?): String? {
-        val base = builder.read(item, head)
-        val fileKey = HgPaths.key(item.path)
-        base.skippedHunks?.let {
-            if (it > 0) partialDiff[fileKey] = it else partialDiff.remove(fileKey)
-        }
-        return base.text
+        return ChangesDiffSource.changedItem(comparison, file.path)
     }
 
     private fun diffFile(item: HgFileItem) {
@@ -1544,126 +1468,22 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         }
     }
 
-    private fun compareLines(left: String, right: String, policy: ComparisonPolicy): List<DiffFragment> =
-        ComparisonManager.getInstance()
-            .compareLines(left, right, policy, DumbProgressIndicator.INSTANCE)
-            .map {
-                DiffFragment(
-                    LineRange(it.startLine1, it.endLine1),
-                    LineRange(it.startLine2, it.endLine2)
-                )
-            }
-
-    private fun fragmentPolicy(): ComparisonPolicy = when (HgSettings.changesetsFragments) {
-        ChangesetsFragments.PLATFORM_TRIMMED -> ComparisonPolicy.TRIM_WHITESPACES
-        ChangesetsFragments.PLATFORM_SETTINGS -> viewerPolicy()
-        else -> ComparisonPolicy.DEFAULT
-    }
-
-    private fun comparisonSignature(): String =
-        ComparisonSignature.of(sourceFiles, comparison.mode, comparison.baseRev, changesetsStamp())
-
-    private fun changesetsStamp(): String = ComparisonSignature.fragmentsStamp(
-        HgSettings.widenToFragments, HgSettings.changesetsFragments, fragmentPolicy().name
+    private fun comparisonSignature(): String = ComparisonSignature.of(
+        sourceFiles, comparison.mode, comparison.baseRev, ChangesDiffSource.changesetsStamp()
     )
-
-    private fun viewerPolicy(): ComparisonPolicy =
-        TextDiffSettingsHolder.TextDiffSettings.getSettings().ignorePolicy.comparisonPolicy
 
     private fun prefetchAround(activated: HgFileItem) {
         val state = comparison
-        val repoRoot = state.repoRoot ?: return
-
+        if (state.repoRoot == null) return
         val items = PrefetchPlan.around(visibleFiles(), FileKeys.of(activated), FileKeys::of)
             .filterNot { it.isTodoItem }
-        if (items.isEmpty()) return
-
-        val requestId = ++prefetchId
-        ApplicationManager.getApplication().executeOnPooledThread {
-            val builder = baseBuilder(repoRoot, state)
-            for (item in items) {
-                if (requestId != prefetchId) return@executeOnPooledThread
-                val plan = DiffSidesPlan.of(item, state.baseRev)
-                if (!plan.rightIsRevision) {
-                    if (plan.needsBase) builder.readRevision(plan.baseRev, plan.basePath)
-                    continue
-                }
-                val head = builder.readRevision(plan.headRev, plan.headPath)
-                if (plan.needsBase) branchBase(builder, item, head)
-            }
-        }
+        diffSource.prefetch(state, items)
     }
-
-    private fun buildRequest(
-        item: HgFileItem,
-        localFile: File,
-        panelBaseRev: String,
-        sides: Sides
-    ): SimpleDiffRequest? {
-        val base = sides.base
-        val head = sides.head
-        val onlyLast = sides.onlyLast
-        val skippedHunks = sides.skippedHunks
-        val factory = DiffContentFactory.getInstance()
-        val fileType = FileTypeManager.getInstance().getFileTypeByFileName(localFile.name)
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(localFile)
-        val plan = DiffSidesPlan.of(item, panelBaseRev)
-        val baseRev = if (onlyLast) plan.lastChangeBaseRev else panelBaseRev
-        val fromRevision = plan.rightIsRevision
-
-        if (base == null && head == null && vf == null) return null
-
-        val rightIsLocalFile = if (fromRevision) vf != null && head != null && localMatches(vf, head)
-        else vf != null
-        val baseContent = if (base != null) revisionContent(base, vf, fileType) else factory.createEmpty()
-        val rightContent = when {
-            fromRevision -> when {
-                head == null -> factory.createEmpty()
-                rightIsLocalFile -> factory.create(project, vf!!)
-                else -> revisionContent(head, vf, fileType)
-            }
-            vf != null -> factory.create(project, vf)
-            else -> factory.createEmpty()
-        }
-        val baseTitle = DiffTitles.left(base != null, fromRevision, onlyLast, baseRev, item.copiedFrom)
-        val rightTitle = DiffTitles.right(
-            fromRevision, onlyLast, head != null, rightIsLocalFile, vf != null,
-            item.headRev, skippedHunks
-        )
-
-        val request = SimpleDiffRequest(localFile.name, baseContent, rightContent, baseTitle, rightTitle)
-        request.putUserData(DiffUserDataKeys.PREFERRED_FOCUS_SIDE, Side.RIGHT)
-        project.service<HgChangesService>().takePendingCaret(localFile.path)?.let {
-            HgDiffProcessor.requestRightCaret(request, it)
-        }
-        return request
-    }
-
-    private fun localMatches(file: VirtualFile, text: String): Boolean {
-        val document = inReadAction { FileDocumentManager.getInstance().getDocument(file) }
-        if (document == null) {
-            LOG.info("Hg diff: no document for ${file.path}, right side falls back to the revision")
-            return false
-        }
-        val local = inReadAction { document.text }
-        if (local == text) return true
-        LOG.info(
-            "Hg diff: ${file.path} differs from the revision, right side falls back to it. " +
-                TextMismatch.describe(local, text)
-        )
-        return false
-    }
-
-    private fun revisionContent(text: String, file: VirtualFile?, fileType: FileType) =
-        if (file != null) DiffContentFactory.getInstance().create(project, text, file)
-        else DiffContentFactory.getInstance().create(project, text, fileType)
 
     private fun revertSelected() {
         val state = comparison
         val repoRoot = state.repoRoot ?: return
-        val selected = selectedNodes()
-            .flatMap { ChangesTreeBuilder.filesOf(it) }
-            .distinctBy { it.path }
+        val selected = selectedFiles().distinctBy { it.path }
         if (selected.isEmpty()) return
         if (!confirmRevert(selected)) return
 

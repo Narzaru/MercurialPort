@@ -2,6 +2,7 @@ package com.narzaru.mercurial.hg
 
 import com.intellij.openapi.components.serviceIfCreated
 import com.intellij.openapi.options.Configurable
+import com.intellij.openapi.options.ConfigurationException
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.ui.dsl.builder.panel
@@ -131,7 +132,7 @@ class HgSettingsConfigurable : Configurable {
     override fun apply() {
         val encoding = selectedEncoding()
         if (!HgSettings.isKnownCharset(encoding)) {
-            throw com.intellij.openapi.options.ConfigurationException("Unknown encoding: $encoding")
+            throw ConfigurationException("Unknown encoding: $encoding")
         }
 
         val statusChanged = statusLetterCheck.isSelected != HgSettings.statusInTabs

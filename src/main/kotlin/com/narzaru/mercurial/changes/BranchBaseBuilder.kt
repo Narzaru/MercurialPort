@@ -54,7 +54,7 @@ class BranchBaseBuilder(
 
         var lines = head.split("\n")
         var skipped = 0
-        val names = namesOf(item)
+        val names = item.names
         for (rev in revs.asReversed()) {
             val res = commands.run(listOf("diff", "--git", "-c", rev) + names.map { "path:$it" })
             if (!res.success) {
@@ -91,7 +91,7 @@ class BranchBaseBuilder(
     }
 
     private fun hgFragments(item: HgFileItem, baseRev: String): List<DiffFragment>? {
-        val names = namesOf(item)
+        val names = item.names
         val res = commands.run(
             listOf("diff", "--git", "-U", "0", "--rev", baseRev, "--rev", item.headRev) +
                 names.map { "path:$it" }
@@ -104,9 +104,6 @@ class BranchBaseBuilder(
             DiffFragment(lineRange(it.oldStart, it.oldLines.size), lineRange(it.newStart, it.newLines.size))
         }
     }
-
-    private fun namesOf(item: HgFileItem): List<String> =
-        listOfNotNull(item.path, item.copiedFrom.ifEmpty { null })
 
     private fun lineRange(start: Int, size: Int): LineRange =
         if (size == 0) LineRange(start, start) else LineRange(start - 1, start - 1 + size)

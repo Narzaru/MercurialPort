@@ -148,7 +148,7 @@ class ReviewMarksTest {
         marks.touch("three")
         marks.touch("four")
 
-        assertEquals(listOf("one", "two"), marks.branches().sorted())
+        assertEquals(listOf("one", "two"), store.order.sorted())
     }
 
     @Test

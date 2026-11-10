@@ -39,7 +39,7 @@ class HgServerStartup private constructor(private val process: Process, private 
                 .withWorkingDirectory(workDir.toPath())
                 .createProcess()
             HgAwait.start("hg command server stderr") {
-                runCatching { process.errorStream.use { it.readBytes() } }
+                runCatching { process.errorStream.use { it.transferTo(OutputStream.nullOutputStream()) } }
             }
             HgServerStartup(process, workDir)
         } catch (e: Exception) {

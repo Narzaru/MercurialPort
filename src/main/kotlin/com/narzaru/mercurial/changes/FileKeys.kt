@@ -9,4 +9,7 @@ object FileKeys {
         val path = HgPaths.key(item.path)
         return if (item.isTodoItem) "$path:${item.lineNumber}" else path
     }
+
+    fun relativeTo(repoRoot: String, path: String): String? =
+        HgPaths.relativize(HgPaths.normalize(path), HgPaths.normalize(repoRoot))?.let { HgPaths.key(it) }
 }

@@ -40,13 +40,13 @@ class ParallelJobsTest {
     @Test
     fun `the same result comes back on a single thread`() {
         val keys = listOf("a", "b", "c")
-        assertEquals(listOf("A", "B", "C"), ParallelJobs(TaskLauncher.SAME_THREAD).map(keys) { it.uppercase() })
+        assertEquals(listOf("A", "B", "C"), ParallelJobs(SameThreadLauncher).map(keys) { it.uppercase() })
     }
 
     @Test
     fun `a failure ends the run and comes back last`() {
         val started = AtomicInteger()
-        val result = ParallelJobs(TaskLauncher.SAME_THREAD, 2).map(
+        val result = ParallelJobs(SameThreadLauncher, 2).map(
             (1..10).toList(),
             { it < 0 }
         ) { key ->
@@ -105,7 +105,7 @@ class ParallelJobsTest {
     @Test
     fun `an empty key list runs nothing`() {
         val calls = AtomicInteger()
-        val result = ParallelJobs(TaskLauncher.SAME_THREAD).map(emptyList<String>()) { calls.incrementAndGet() }
+        val result = ParallelJobs(SameThreadLauncher).map(emptyList<String>()) { calls.incrementAndGet() }
         assertTrue(result.isEmpty())
         assertEquals(0, calls.get())
     }

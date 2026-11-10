@@ -435,7 +435,7 @@ class ChangesLoaderTest {
         customBranch: String = "",
         untracked: Boolean = false,
         overrides: (String) -> List<String> = { emptyList() }
-    ): ChangesResult = ChangesLoader(hg, ParallelJobs(TaskLauncher.SAME_THREAD), overrides, {})
+    ): ChangesResult = ChangesLoader(hg, ParallelJobs(SameThreadLauncher), overrides, {})
         .load(mode, customBranch, untracked)
 
     private fun ok(stdout: String) = HgResult(0, stdout, "")

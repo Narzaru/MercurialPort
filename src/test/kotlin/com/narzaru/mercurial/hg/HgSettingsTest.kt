@@ -20,6 +20,19 @@ class HgSettingsTest {
     }
 
     @Test
+    fun `switches keep the keys and defaults they were saved under`() {
+        assertEquals(
+            mapOf(
+                "mercurial.changesetsWiden" to true,
+                "mercurial.ignoreEolChanges" to true,
+                "mercurial.statusInTabs" to true,
+                "mercurial.commandServer" to true
+            ),
+            HgSettings.flagDefaults
+        )
+    }
+
+    @Test
     fun `a server count outside the offered bounds is pulled back into them`() {
         assertEquals(HgServerPool.MIN_SERVERS, HgSettings.boundCount(0))
         assertEquals(HgServerPool.MAX_SERVERS, HgSettings.boundCount(12))

@@ -32,7 +32,5 @@ object RevertPlan {
         return args
     }
 
-    fun affectedPaths(files: List<HgFileItem>): List<String> = files.flatMap { item ->
-        listOfNotNull(item.path, item.copiedFrom.takeIf { it.isNotEmpty() })
-    }
+    fun affectedPaths(files: List<HgFileItem>): List<String> = files.flatMap { it.names }
 }

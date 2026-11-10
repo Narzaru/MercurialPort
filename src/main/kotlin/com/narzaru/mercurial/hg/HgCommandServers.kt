@@ -10,18 +10,21 @@ import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.util.concurrency.AppExecutorUtil
 import java.io.File
+import java.util.concurrent.FutureTask
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
-class HgServerLease internal constructor(
-    private val servers: HgCommandServers,
-    private val claim: HgServerClaim,
-    val server: HgServer
-) {
+internal sealed interface HgServerCall {
 
-    fun release() = servers.giveBack(claim, server)
+    class Answered(val response: HgServerResponse) : HgServerCall
 
-    fun discard() = servers.throwAway(claim, server)
+    data object TimedOut : HgServerCall
+
+    data object Interrupted : HgServerCall
+
+    data object Unavailable : HgServerCall
+
+    class Failed(val reason: String?) : HgServerCall
 }
 
 @Service(Service.Level.APP)
@@ -34,17 +37,65 @@ class HgCommandServers : Disposable {
     private val sweep: ScheduledFuture<*> = AppExecutorUtil.getAppScheduledExecutorService()
         .scheduleWithFixedDelay({ closeLater(pool.evictIdle()) }, SWEEP_SECONDS, SWEEP_SECONDS, TimeUnit.SECONDS)
 
-    fun lease(workDir: File): HgServerLease? {
-        applySettings()
-        return wait.untilReady { attemptLease(workDir) }
+    internal fun call(workDir: File, args: List<String>): HgServerCall {
+        val lease = try {
+            lease(workDir)
+        } catch (e: ProcessCanceledException) {
+            throw e
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            null
+        } catch (e: Exception) {
+            return HgServerCall.Failed(e.message)
+        }
+        return lease?.let { callOn(it, args) } ?: HgServerCall.Unavailable
     }
 
     fun applySettings() = closeLater(pool.resize(HgSettings.commandServerCount))
 
-    private fun attemptLease(workDir: File): HgWaitAttempt<HgServerLease> {
+    private fun lease(workDir: File): Lease? {
+        applySettings()
+        return wait.untilReady { attemptLease(workDir) }
+    }
+
+    private fun callOn(lease: Lease, args: List<String>): HgServerCall {
+        val call = HgAwait.start(CALL_THREAD) { lease.server.run(args) }
+        var settlement = Settlement.DISCARD
+        try {
+            val response = HgAwait.finish(call) ?: return HgServerCall.TimedOut
+            settlement = Settlement.RELEASE
+            return HgServerCall.Answered(response)
+        } catch (e: ProcessCanceledException) {
+            settlement = Settlement.DRAIN
+            throw e
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return HgServerCall.Interrupted
+        } catch (e: Exception) {
+            return HgServerCall.Failed(e.message)
+        } finally {
+            settle(settlement, lease, call)
+        }
+    }
+
+    private fun settle(settlement: Settlement, lease: Lease, call: FutureTask<HgServerResponse>) =
+        when (settlement) {
+            Settlement.RELEASE -> giveBack(lease)
+            Settlement.DISCARD -> throwAway(lease)
+            Settlement.DRAIN -> drainThenSettle(lease, call)
+        }
+
+    private fun drainThenSettle(lease: Lease, call: FutureTask<HgServerResponse>) {
+        HgAwait.start(DRAIN_THREAD) {
+            val drained = runCatching { call.get(HgAwait.TIMEOUT_SECONDS, TimeUnit.SECONDS) }.isSuccess
+            if (drained) giveBack(lease) else throwAway(lease)
+        }
+    }
+
+    private fun attemptLease(workDir: File): HgWaitAttempt<Lease> {
         val claim = pool.claim(keyOf(workDir))
         closeLater(claim.stale)
-        claim.server?.let { return HgWaitAttempt.ready(HgServerLease(this, claim, it)) }
+        claim.server?.let { return HgWaitAttempt.ready(Lease(claim, it)) }
         if (!claim.startNeeded) {
             return if (claim.refused) HgWaitAttempt.unavailable() else HgWaitAttempt.busy()
         }
@@ -62,7 +113,7 @@ class HgCommandServers : Disposable {
             closeLater(listOf(started))
             return HgWaitAttempt.busy()
         }
-        return HgWaitAttempt.ready(HgServerLease(this, claim, started))
+        return HgWaitAttempt.ready(Lease(claim, started))
     }
 
     fun projectClosing(closing: Project) {
@@ -86,13 +137,13 @@ class HgCommandServers : Disposable {
         pool.closeAll().forEach { closeQuietly(it) }
     }
 
-    internal fun giveBack(claim: HgServerClaim, server: HgServer) {
-        if (!pool.release(claim, server)) closeLater(listOf(server))
+    private fun giveBack(lease: Lease) {
+        if (!pool.release(lease.claim, lease.server)) closeLater(listOf(lease.server))
     }
 
-    internal fun throwAway(claim: HgServerClaim, server: HgServer) {
-        pool.discard(claim, server)
-        closeLater(listOf(server))
+    private fun throwAway(lease: Lease) {
+        pool.discard(lease.claim, lease.server)
+        closeLater(listOf(lease.server))
     }
 
     private fun startUnderDeadline(workDir: File): HgCommandServer? {
@@ -129,9 +180,15 @@ class HgCommandServers : Disposable {
 
     private fun keyOf(dir: File): String = runCatching { dir.canonicalPath }.getOrDefault(dir.absolutePath)
 
+    private class Lease(val claim: HgServerClaim, val server: HgServer)
+
+    private enum class Settlement { RELEASE, DISCARD, DRAIN }
+
     companion object {
 
         private const val SWEEP_SECONDS = 60L
+        private const val CALL_THREAD = "hg command server call"
+        private const val DRAIN_THREAD = "hg command server drain"
 
         private val LOG = Logger.getInstance(HgCommandServers::class.java)
 

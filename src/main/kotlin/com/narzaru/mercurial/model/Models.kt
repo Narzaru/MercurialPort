@@ -94,6 +94,8 @@ data class HgFileItem(
 
     val basePath: String get() = copiedFrom.ifEmpty { path }
 
+    val names: List<String> get() = if (copiedFrom.isEmpty()) listOf(path) else listOf(path, copiedFrom)
+
     val isTodoItem: Boolean get() = lineNumber > 0
 
     val name: String get() = path.substringAfterLast('/').substringAfterLast('\\')

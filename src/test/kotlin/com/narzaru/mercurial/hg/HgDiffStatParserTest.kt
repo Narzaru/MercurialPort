@@ -261,7 +261,7 @@ class HgDiffStatParserTest {
     fun `a file gets a short hex hash`() {
         val hash = hashOf("diff --git a/a.kt b/a.kt\n@@ -1 +1 @@\n-old\n+new")
 
-        assertEquals(HgDiffStatParser.HASH_LENGTH, hash.length)
+        assertEquals(HgHash.LENGTH, hash.length)
         assertTrue(hash.all { it in "0123456789abcdef" })
     }
 

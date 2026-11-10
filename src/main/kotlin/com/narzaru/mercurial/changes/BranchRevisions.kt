@@ -147,11 +147,11 @@ data class FileRange(
 
 class RevisionSelection private constructor(private val overrides: Map<String, Boolean>) {
 
-    fun isSelected(revision: HgRevision): Boolean = overrides[revision.node] ?: !revision.isMerge
+    fun isSelected(revision: HgRevision): Boolean = overrides[revision.node] ?: defaultFor(revision)
 
     fun with(revision: HgRevision, selected: Boolean): RevisionSelection {
         val next = HashMap(overrides)
-        if (selected == !revision.isMerge) next.remove(revision.node) else next[revision.node] = selected
+        if (selected == defaultFor(revision)) next.remove(revision.node) else next[revision.node] = selected
         return RevisionSelection(next)
     }
 
@@ -159,10 +159,12 @@ class RevisionSelection private constructor(private val overrides: Map<String, B
         val kept = HashMap<String, Boolean>()
         for (revision in revisions) {
             val value = overrides[revision.node] ?: continue
-            if (value != !revision.isMerge) kept[revision.node] = value
+            if (value != defaultFor(revision)) kept[revision.node] = value
         }
         return RevisionSelection(kept)
     }
+
+    private fun defaultFor(revision: HgRevision): Boolean = !revision.isMerge
 
     fun isDefaultFor(revisions: List<HgRevision>): Boolean =
         revisions.none { overrides.containsKey(it.node) }

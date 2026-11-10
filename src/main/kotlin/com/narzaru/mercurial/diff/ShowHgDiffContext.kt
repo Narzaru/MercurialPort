@@ -9,23 +9,14 @@ import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.components.service
 import com.intellij.openapi.vfs.VirtualFile
 
-object ToggleDiffContext {
+object ShowHgDiffContext {
 
-    fun targetOf(context: DataContext): ToggleDiffTarget {
-        val project = CommonDataKeys.PROJECT.getData(context) ?: return ToggleDiffTarget.None
-        if (isInDiff(context)) return ToggleDiffPlan.of(true, false, false, null)
-        val file = editedFileOf(context) ?: return ToggleDiffTarget.None
+    fun targetOf(context: DataContext): ShowHgDiffTarget {
+        val project = CommonDataKeys.PROJECT.getData(context) ?: return ShowHgDiffTarget.None
+        if (isInDiff(context)) return ShowHgDiffTarget.None
+        val file = editedFileOf(context) ?: return ShowHgDiffTarget.None
         val changes = project.service<HgChangesService>()
-        val loaded = changes.changesLoaded()
-        val tabKey = if (loaded && changes.hasDiff(file)) changes.diffTabKeyOf(file) else null
-        return ToggleDiffPlan.of(false, true, loaded, tabKey)
-    }
-
-    fun editedFileOf(context: DataContext): VirtualFile? {
-        if (CommonDataKeys.EDITOR.getData(context) == null) return null
-        val file = CommonDataKeys.VIRTUAL_FILE.getData(context) ?: return null
-        if (file.isDirectory || !file.isInLocalFileSystem) return null
-        return file
+        return ShowHgDiffPlan.of(file.path, changes.changesLoaded(), changes.diffTabKeyOf(file))
     }
 
     fun caretOf(context: DataContext): DiffCaret? {
@@ -33,6 +24,13 @@ object ToggleDiffContext {
         val offset = editor.caretModel.offset
         val line = editor.document.getLineNumber(offset)
         return CaretTransfer.toDiff(line, offset - editor.document.getLineStartOffset(line))
+    }
+
+    private fun editedFileOf(context: DataContext): VirtualFile? {
+        if (CommonDataKeys.EDITOR.getData(context) == null) return null
+        val file = CommonDataKeys.VIRTUAL_FILE.getData(context) ?: return null
+        if (file.isDirectory || !file.isInLocalFileSystem) return null
+        return file
     }
 
     private fun isInDiff(context: DataContext): Boolean =

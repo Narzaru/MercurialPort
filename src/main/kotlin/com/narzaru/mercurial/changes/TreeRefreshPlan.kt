@@ -1,12 +1,9 @@
 package com.narzaru.mercurial.changes
 
-import com.narzaru.mercurial.hg.HgPaths
 import com.narzaru.mercurial.model.HgFileItem
 import javax.swing.tree.DefaultMutableTreeNode
 
 object TreeRefreshPlan {
-
-    fun nodeKey(item: HgFileItem): String = "${HgPaths.key(item.path)}#${item.lineNumber}"
 
     fun dirPath(node: DefaultMutableTreeNode): String {
         val names = ArrayList<String>()
@@ -26,7 +23,7 @@ object TreeRefreshPlan {
     fun keepsStructure(shown: List<HgFileItem>, next: List<HgFileItem>): Boolean {
         if (shown.size != next.size) return false
         for (index in shown.indices) {
-            if (nodeKey(shown[index]) != nodeKey(next[index])) return false
+            if (FileKeys.of(shown[index]) != FileKeys.of(next[index])) return false
         }
         return true
     }

@@ -39,16 +39,14 @@ object FileChangeScope {
         openDiffKeys: Set<String>
     ): FileChangeReaction {
         if (changedPaths.isEmpty()) return FileChangeReaction.NONE
-        val root = HgPaths.normalize(repoRoot).trimEnd('/')
         val listed = files.asSequence().map { HgPaths.key(it.path) }.toSet()
         val touched = LinkedHashSet<String>()
         val unlisted = LinkedHashSet<String>()
         var repoState = false
         var ignoreRules = false
         for (path in changedPaths) {
-            val relative = HgPaths.relativize(HgPaths.normalize(path), root) ?: continue
-            if (relative.isEmpty()) continue
-            val key = HgPaths.key(relative)
+            val key = FileKeys.relativeTo(repoRoot, path) ?: continue
+            if (key.isEmpty()) continue
             if (isIgnoreRules(key)) ignoreRules = true
             when {
                 key in listed -> touched.add(key)

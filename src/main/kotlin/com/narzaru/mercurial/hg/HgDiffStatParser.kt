@@ -4,8 +4,6 @@ import com.narzaru.mercurial.model.HgDiffStat
 
 object HgDiffStatParser {
 
-    const val HASH_LENGTH = HgHash.LENGTH
-
     fun parse(bytes: ByteArray): Map<String, HgDiffStat> {
         val result = HashMap<String, HgDiffStat>()
         var path: String? = null

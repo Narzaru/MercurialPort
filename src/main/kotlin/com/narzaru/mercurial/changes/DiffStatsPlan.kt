@@ -64,8 +64,7 @@ object DiffStatsPlan {
     }
 
     private fun statOf(item: HgFileItem, byPath: Map<String, HgDiffStat>): HgDiffStat? =
-        byPath[HgPaths.normalize(item.path)]
-            ?: item.copiedFrom.takeIf { it.isNotEmpty() }?.let { byPath[HgPaths.normalize(it)] }
+        item.names.firstNotNullOfOrNull { byPath[HgPaths.normalize(it)] }
 
     private fun counted(
         item: HgFileItem,
@@ -100,9 +99,7 @@ object DiffStatsPlan {
         for (item in files) {
             val range = rangeOf(item, targetRev)
             if (range !in ranges) continue
-            val paths = byRange.getOrPut(range) { ArrayList() }
-            paths.add(item.path)
-            if (item.copiedFrom.isNotEmpty()) paths.add(item.copiedFrom)
+            byRange.getOrPut(range) { ArrayList() }.addAll(item.names)
         }
         return byRange
     }

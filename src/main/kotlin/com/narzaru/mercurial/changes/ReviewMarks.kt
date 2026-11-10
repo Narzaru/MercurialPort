@@ -25,8 +25,6 @@ class ReviewMarks(
         store.branchOrder().filter { it.isNotEmpty() }.distinct().take(maxBranches).forEach { order.add(it) }
     }
 
-    fun branches(): List<String> = order.toList()
-
     fun contains(branch: String, path: String, hash: String): Boolean =
         branch in order && marksOf(branch)[path]?.contains(hash) == true
 

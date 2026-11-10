@@ -4,6 +4,8 @@ import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.application.ApplicationManager
 import com.narzaru.mercurial.model.ChangesetsFragments
 import java.nio.charset.Charset
+import kotlin.properties.ReadWriteProperty
+import kotlin.reflect.KProperty
 
 object HgSettings {
 
@@ -14,6 +16,8 @@ object HgSettings {
     private const val STATUS_IN_TABS_KEY = "mercurial.statusInTabs"
     private const val COMMAND_SERVER_KEY = "mercurial.commandServer"
     private const val COMMAND_SERVER_COUNT_KEY = "mercurial.commandServerCount"
+
+    private val flags = ArrayList<Flag>()
 
     val suggestedEncodings: List<String> = listOf(
         "windows-1251", "UTF-8", "IBM866", "KOI8-R", "windows-1252", "ISO-8859-1"
@@ -28,9 +32,7 @@ object HgSettings {
         get() = properties()?.getValue(ENCODING_KEY, systemDefault) ?: systemDefault
         set(value) = PropertiesComponent.getInstance().setValue(ENCODING_KEY, value, systemDefault)
 
-    var widenToFragments: Boolean
-        get() = properties()?.getBoolean(WIDEN_KEY, true) ?: true
-        set(value) = PropertiesComponent.getInstance().setValue(WIDEN_KEY, value, true)
+    var widenToFragments: Boolean by flag(WIDEN_KEY, true)
 
     var changesetsFragments: ChangesetsFragments
         get() {
@@ -41,17 +43,11 @@ object HgSettings {
         set(value) = PropertiesComponent.getInstance()
             .setValue(FRAGMENTS_KEY, value.name, ChangesetsFragments.PLATFORM_TRIMMED.name)
 
-    var ignoreEolChanges: Boolean
-        get() = properties()?.getBoolean(IGNORE_EOL_KEY, true) ?: true
-        set(value) = PropertiesComponent.getInstance().setValue(IGNORE_EOL_KEY, value, true)
+    var ignoreEolChanges: Boolean by flag(IGNORE_EOL_KEY, true)
 
-    var statusInTabs: Boolean
-        get() = properties()?.getBoolean(STATUS_IN_TABS_KEY, true) ?: true
-        set(value) = PropertiesComponent.getInstance().setValue(STATUS_IN_TABS_KEY, value, true)
+    var statusInTabs: Boolean by flag(STATUS_IN_TABS_KEY, true)
 
-    var useCommandServer: Boolean
-        get() = properties()?.getBoolean(COMMAND_SERVER_KEY, true) ?: true
-        set(value) = PropertiesComponent.getInstance().setValue(COMMAND_SERVER_KEY, value, true)
+    var useCommandServer: Boolean by flag(COMMAND_SERVER_KEY, true)
 
     var commandServerCount: Int
         get() = boundCount(
@@ -60,6 +56,8 @@ object HgSettings {
         )
         set(value) = PropertiesComponent.getInstance()
             .setValue(COMMAND_SERVER_COUNT_KEY, boundCount(value), HgServerPool.DEFAULT_SERVERS)
+
+    internal val flagDefaults: Map<String, Boolean> get() = flags.associate { it.key to it.default }
 
     fun boundCount(value: Int): Int =
         value.coerceIn(HgServerPool.MIN_SERVERS, HgServerPool.MAX_SERVERS)
@@ -76,9 +74,20 @@ object HgSettings {
     private fun properties(): PropertiesComponent? =
         if (ApplicationManager.getApplication() == null) null else PropertiesComponent.getInstance()
 
+    private fun flag(key: String, default: Boolean): Flag = Flag(key, default).also { flags.add(it) }
+
     fun isKnownCharset(name: String): Boolean = try {
         Charset.isSupported(name)
     } catch (_: IllegalArgumentException) {
         false
+    }
+
+    private class Flag(val key: String, val default: Boolean) : ReadWriteProperty<Any?, Boolean> {
+
+        override fun getValue(thisRef: Any?, property: KProperty<*>): Boolean =
+            properties()?.getBoolean(key, default) ?: default
+
+        override fun setValue(thisRef: Any?, property: KProperty<*>, value: Boolean) =
+            PropertiesComponent.getInstance().setValue(key, value, default)
     }
 }

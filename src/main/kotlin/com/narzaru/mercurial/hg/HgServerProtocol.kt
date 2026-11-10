@@ -5,7 +5,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.nio.charset.Charset
 
-class HgServerFrame(val channel: Char, val length: Int, val data: ByteArray)
+class HgServerFrame(val channel: Char, val data: ByteArray)
 
 class HgServerResponse(val exitCode: Int, val stdout: ByteArray, val stderr: ByteArray)
 
@@ -75,10 +75,10 @@ object HgServerProtocol {
             throw HgServerProtocolException("Channel '$channel' announced an unusable length of $length bytes")
         }
         if (channel == INPUT_CHANNEL || channel == LINE_CHANNEL) {
-            return HgServerFrame(channel, length, ByteArray(0))
+            return HgServerFrame(channel, ByteArray(0))
         }
         val data = readExactly(input, length, "$length bytes of channel '$channel'")
-        return HgServerFrame(channel, length, data)
+        return HgServerFrame(channel, data)
     }
 
     fun readResponse(input: InputStream, toServer: OutputStream): HgServerResponse {

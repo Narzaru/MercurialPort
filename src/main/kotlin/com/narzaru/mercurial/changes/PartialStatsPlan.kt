@@ -33,10 +33,7 @@ object PartialStatsPlan {
         if (changedKeys.isEmpty() || files.isEmpty()) return PartialStatsAction.Skip
 
         val wanted = changedKeys.mapTo(HashSet()) { HgPaths.key(it) }
-        val touched = files.filter { item ->
-            HgPaths.key(item.path) in wanted ||
-                (item.copiedFrom.isNotEmpty() && HgPaths.key(item.copiedFrom) in wanted)
-        }
+        val touched = files.filter { item -> item.names.any { HgPaths.key(it) in wanted } }
         if (touched.isEmpty()) return PartialStatsAction.Skip
 
         val ranges = touched.mapTo(LinkedHashSet()) { DiffStatsPlan.rangeOf(it, targetRev) }

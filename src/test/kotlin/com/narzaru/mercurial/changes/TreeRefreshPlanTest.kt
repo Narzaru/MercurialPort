@@ -94,12 +94,6 @@ class TreeRefreshPlanTest {
         assertFalse(TreeRefreshPlan.keepsStructure(shown, next))
     }
 
-    @Test
-    fun `a node key holds the path and the line number`() {
-        assertEquals("src/a.kt#0", TreeRefreshPlan.nodeKey(file("src/A.kt")))
-        assertEquals("src/a.kt#12", TreeRefreshPlan.nodeKey(file("src/A.kt", line = 12)))
-    }
-
     private fun tree(vararg paths: String) =
         ChangesTreeBuilder.build(paths.map { file(it) }) { false }
 

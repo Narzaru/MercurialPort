@@ -65,11 +65,13 @@
   не попадает, его хэш — хэш содержимого с диска (`HgContentHash`, префикс `c:`, выбор файлов —
   `DiffStatsPlan.isHashedByContent`, частичный пересчёт без запуска `hg` — `PartialStatsPlan`);
 - состояние окна изменений — `PathFilter`, `ChangesSettings`, `StatusTextFormatter`, `BranchScope`,
-  `BranchRevisions`, выбор строки открытого файла — `OpenedFileRow`;
+  `BranchRevisions`, выбор строки открытого файла — `OpenedFileRow`, ключи файлов — `FileKeys`;
 - окно истории — `HistoryFollowPlan` (следование за редактором), `HistoryRenameTrail`,
   `HistoryDiffSelection`;
 - сборка диффа — `HgPatchApplier`, `FragmentScope`;
-- переключение файл ↔ дифф по F4 — `ToggleDiffPlan`, `CaretTransfer`;
+- стороны диффа для сравнения — `DiffSidesReader` (из каких ревизий собираются стороны), сам запрос
+  и его кэши — `ChangesDiffSource`;
+- дифф файла по F4 — `ShowHgDiffPlan`, `CaretTransfer`;
 - дерево и отрисовка — `ChangesTreeBuilder`, `UnreviewedDirs`, `ChangesTreeRenderers`, `TextFitter`.
 
 Новую логику имеет смысл добавлять туда же, а не в панель: внутри Swing-компонента её не вызвать

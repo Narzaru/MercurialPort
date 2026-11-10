@@ -24,7 +24,7 @@ class HgContentHashTest {
 
         assertTrue(hash.startsWith(HgContentHash.PREFIX))
         val hex = hash.removePrefix(HgContentHash.PREFIX)
-        assertEquals(HgDiffStatParser.HASH_LENGTH, hex.length)
+        assertEquals(HgHash.LENGTH, hex.length)
         assertTrue(hex.all { it in "0123456789abcdef" })
     }
 

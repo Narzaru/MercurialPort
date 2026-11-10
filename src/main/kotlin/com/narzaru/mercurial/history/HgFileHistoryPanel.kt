@@ -103,25 +103,19 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         disposed = true
         val service = project.service<HgFileHistoryService>()
         if (service.panel === this) service.panel = null
-        renameCache.clear()
     }
 
     private fun currentEditorPath(): String? =
-        FileEditorManager.getInstance(project).selectedFiles.firstOrNull()
-            ?.takeIf { !it.isDirectory }
-            ?.let { sourcePathOf(it) }
+        FileEditorManager.getInstance(project).selectedFiles.firstOrNull()?.let { sourcePathOf(it) }
 
-    private fun sourcePathOf(file: VirtualFile): String? =
-        if (file.isInLocalFileSystem) file.path
-        else project.service<HgDiffTabManager>().sourcePathOf(file)
+    private fun sourcePathOf(file: VirtualFile): String? = project.service<HgDiffTabManager>().sourcePathOf(file)
 
     private fun followActiveEditor() {
         project.messageBus.connect(this).subscribe(
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
             object : FileEditorManagerListener {
                 override fun selectionChanged(event: FileEditorManagerEvent) {
-                    val file = event.newFile?.takeIf { !it.isDirectory } ?: return
-                    val path = sourcePathOf(file) ?: return
+                    val path = sourcePathOf(event.newFile ?: return) ?: return
                     requestHistory(path, fromEditor = true)
                 }
             }
@@ -309,11 +303,10 @@ class HgFileHistoryPanel(private val project: Project) : JPanel(BorderLayout()),
         val root = current.root ?: return
         val row = selectedModelRows().firstOrNull { tableModel.itemAt(it) != null } ?: return
         val item = tableModel.itemAt(row) ?: return
-        val rel = item.path.ifBlank { HgPaths.relativize(current.file, root) }
         val trail = renameTrail(root, tableModel.items())
         ApplicationManager.getApplication().executeOnPooledThread {
             var failure: String? = null
-            val found = trail.follow(rel, row) { path ->
+            val found = trail.follow(item.path, row) { path ->
                 catBytes(root, path, item.revision) { failure = it }
             }
             val tmp = found.content?.let { bytes ->

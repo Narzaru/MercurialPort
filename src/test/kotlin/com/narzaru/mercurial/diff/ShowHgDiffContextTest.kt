@@ -7,7 +7,7 @@ import com.intellij.openapi.actionSystem.impl.SimpleDataContext
 import com.intellij.openapi.project.Project
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 
-class ToggleDiffContextTest : BasePlatformTestCase() {
+class ShowHgDiffContextTest : BasePlatformTestCase() {
 
     fun `test the editor inside a diff leaves jump to source to the platform`() {
         val comparedFile = myFixture.configureByText("a.txt", "text").virtualFile
@@ -18,7 +18,7 @@ class ToggleDiffContextTest : BasePlatformTestCase() {
             .add(DiffDataKeys.DIFF_CONTEXT, FakeDiffContext(project))
             .build()
 
-        assertEquals(ToggleDiffTarget.None, ToggleDiffContext.targetOf(context))
+        assertEquals(ShowHgDiffTarget.None, ShowHgDiffContext.targetOf(context))
     }
 
     private class FakeDiffContext(private val project: Project) : DiffContext() {

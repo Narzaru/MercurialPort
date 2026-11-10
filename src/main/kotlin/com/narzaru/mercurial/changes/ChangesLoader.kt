@@ -24,7 +24,19 @@ data class ChangesResult(
     val statsPaths: Map<DiffRange, List<String>> = emptyMap(),
 
     val currentInfo: String = ""
-)
+) {
+
+    companion object {
+
+        fun failure(
+            error: String,
+            targetRev: String,
+            branch: String,
+            revisions: List<HgRevision>,
+            selection: RevisionSelection
+        ): ChangesResult = ChangesResult(emptyList(), targetRev, "", error, branch, revisions, selection)
+    }
+}
 
 class ChangesLoader(
     private val commands: HgCommands,
@@ -74,7 +86,7 @@ class ChangesLoader(
             } else {
                 "No revisions selected — pick at least one below."
             }
-            return ChangesResult(emptyList(), ".", "", text, branch, revisions, selection)
+            return ChangesResult.failure(text, ".", branch, revisions, selection)
         }
 
         val targetRev = earlyTargetRev ?: BranchRevisions.baseRevset(selectedNodes)
@@ -86,7 +98,7 @@ class ChangesLoader(
 
         if (mode == HgDisplayMode.MERGE) {
             StatusTextFormatter.mergeBaseProblem(customBranch, currentInfo, baseInfo)?.let {
-                return ChangesResult(emptyList(), ".", "", it, branch, revisions, selection)
+                return ChangesResult.failure(it, ".", branch, revisions, selection)
             }
         }
 
@@ -107,8 +119,8 @@ class ChangesLoader(
             )
         }
         if (!statusRes.success) {
-            return ChangesResult(
-                emptyList(), targetRev, "", StatusTextFormatter.statusError(mode, statusRes), branch, revisions, selection
+            return ChangesResult.failure(
+                StatusTextFormatter.statusError(mode, statusRes), targetRev, branch, revisions, selection
             )
         }
 
@@ -139,9 +151,7 @@ class ChangesLoader(
             )
         }
         if (!log.success) {
-            return ChangesResult(
-                emptyList(), targetRev, "", HgFailure.message(log), branch, revisions, selection
-            )
+            return ChangesResult.failure(HgFailure.message(log), targetRev, branch, revisions, selection)
         }
 
         val ownFiles = trace.timed("parse changeset log") { BranchRevisions.parseFileTouches(log.stdout) }
@@ -156,22 +166,16 @@ class ChangesLoader(
         val statusCache = HashMap<DiffRange, List<HgFileItem>>()
         var ranges = trace.timed("file ranges") { BranchRevisions.fileRanges(selectedNodes, touches, listed) }
         prefetchSingleRevisions(ranges, revisions, statusCache, trace)
+        fun rangeFailure(failure: HgResult) = ChangesResult.failure(
+            StatusTextFormatter.statusError(HgDisplayMode.CHANGESETS, failure), targetRev, branch, revisions, selection
+        )
+
         var collected = collectRangeFiles(ranges, statusCache, trace, "range files")
-        collected.failure?.let {
-            return ChangesResult(
-                emptyList(), targetRev, "", StatusTextFormatter.statusError(HgDisplayMode.CHANGESETS, it),
-                branch, revisions, selection
-            )
-        }
+        collected.failure?.let { return rangeFailure(it) }
         BranchRevisions.mergeRenames(ranges, collected.renames, selectedNodes)?.let { joined ->
             ranges = joined
             collected = collectRangeFiles(joined, statusCache, trace, "range files after renames")
-            collected.failure?.let {
-                return ChangesResult(
-                    emptyList(), targetRev, "", StatusTextFormatter.statusError(HgDisplayMode.CHANGESETS, it),
-                    branch, revisions, selection
-                )
-            }
+            collected.failure?.let { return rangeFailure(it) }
         }
 
         val revsByFile = HashMap<String, List<String>>()
@@ -287,21 +291,19 @@ class ChangesLoader(
         earlyTargetRev: String?,
         trace: LoadTrace? = null
     ): HeadQueries {
-        val queries = ArrayList<() -> Any>()
+        var branch = ""
+        var revisions = emptyList<HgRevision>()
+        var currentInfo = ""
+        var baseInfo: String? = null
+        val queries = ArrayList<() -> Unit>()
         if (usesRevisions) {
-            queries.add { currentBranch() }
-            queries.add { branchRevisions() }
+            queries.add { branch = currentBranch() }
+            queries.add { revisions = branchRevisions() }
         }
-        queries.add { revisionInfo(".") }
-        if (earlyTargetRev != null) queries.add { revisionInfo(earlyTargetRev) }
+        queries.add { currentInfo = revisionInfo(".") }
+        if (earlyTargetRev != null) queries.add { baseInfo = revisionInfo(earlyTargetRev) }
 
-        val answers = trace.timed("head queries") { jobs.map(queries) { it() } }
-        var next = 0
-        val branch = if (usesRevisions) answers[next++] as String else ""
-        @Suppress("UNCHECKED_CAST")
-        val revisions = if (usesRevisions) answers[next++] as List<HgRevision> else emptyList()
-        val currentInfo = answers[next++] as String
-        val baseInfo = if (earlyTargetRev != null) answers[next] as String else null
+        trace.timed("head queries") { jobs.map(queries) { it() } }
         return HeadQueries(branch, revisions, currentInfo, baseInfo)
     }
 
@@ -322,7 +324,7 @@ class ChangesLoader(
     }
 
     private fun inScope(item: HgFileItem, scope: Set<String>): Boolean =
-        HgPaths.key(item.path) in scope || (item.copiedFrom.isNotEmpty() && HgPaths.key(item.copiedFrom) in scope)
+        item.names.any { HgPaths.key(it) in scope }
 
     private fun branchOwnFiles(selectedNodes: List<String>): Set<String>? {
         val r = commands.run(

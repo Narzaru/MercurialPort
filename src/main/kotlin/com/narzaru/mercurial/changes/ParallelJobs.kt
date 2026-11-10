@@ -1,21 +1,12 @@
 package com.narzaru.mercurial.changes
 
 import java.util.concurrent.Callable
-import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Future
 
 interface TaskLauncher {
 
     fun <T> launch(task: Callable<T>): Future<T>
-
-    companion object {
-
-        val SAME_THREAD: TaskLauncher = object : TaskLauncher {
-            override fun <T> launch(task: Callable<T>): Future<T> =
-                CompletableFuture.completedFuture(task.call())
-        }
-    }
 }
 
 class ParallelJobs(private val launcher: TaskLauncher, private val limit: Int = MAX_PARALLEL) {

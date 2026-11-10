@@ -71,7 +71,7 @@ class HgChangesService(val project: Project) {
         override fun getName(): String = path
 
         override fun process(context: UserDataHolder, indicator: ProgressIndicator): DiffRequest =
-            panel?.buildDiffRequestForPath(path)
+            panel?.let { it.diffSource.request(it.comparison, path) }
                 ?: throw DiffRequestProducerException("No Hg changes for ${File(path).name}")
     }
 

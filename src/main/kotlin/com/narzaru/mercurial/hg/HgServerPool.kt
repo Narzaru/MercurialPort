@@ -37,7 +37,7 @@ class HgServerPool(
     private var limit = limit.coerceIn(MIN_SERVERS, MAX_SERVERS)
 
     @Synchronized
-    fun limit(): Int = limit
+    internal fun limit(): Int = limit
 
     @Synchronized
     fun resize(servers: Int): List<HgServer> {
@@ -116,7 +116,7 @@ class HgServerPool(
     fun roots(): List<String> = pools.keys.toList()
 
     @Synchronized
-    fun liveCount(root: String): Int = pools[root]?.live ?: 0
+    internal fun liveCount(root: String): Int = pools[root]?.live ?: 0
 
     @Synchronized
     fun close(roots: Collection<String>): List<HgServer> {
