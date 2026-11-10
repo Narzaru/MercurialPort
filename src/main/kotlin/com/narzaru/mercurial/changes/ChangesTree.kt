@@ -1,6 +1,8 @@
 package com.narzaru.mercurial.changes
 
+import com.narzaru.mercurial.model.HgChangeRow
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgTodoItem
 import javax.swing.tree.DefaultMutableTreeNode
 
 class DirNode(var name: String) {
@@ -13,26 +15,30 @@ class DirNode(var name: String) {
     override fun toString() = name
 }
 
-class FileNode(val item: HgFileItem) {
+class FileNode(val row: HgChangeRow) {
+
+    val item: HgFileItem get() = row.file
+
     override fun toString() = item.name
 }
 
 object ChangesTreeBuilder {
 
     fun build(
-        items: List<HgFileItem>,
-        scope: List<HgFileItem> = items,
+        rows: List<HgChangeRow>,
+        scope: List<HgChangeRow> = rows,
         isReviewed: (HgFileItem) -> Boolean
     ): DefaultMutableTreeNode {
         val root = DefaultMutableTreeNode(DirNode(""))
         val dirNodes = HashMap<String, DefaultMutableTreeNode>()
         dirNodes[""] = root
 
-        for (item in items.sortedBy { it.path.lowercase() }) {
-            val normalized = item.path.replace('\\', '/')
-            val dirPath = normalized.substringBeforeLast('/', "")
-            val parent = if (item.isTodoItem) root else dirNode(dirPath, dirNodes, root)
-            parent.add(DefaultMutableTreeNode(FileNode(item)))
+        for (row in rows.sortedBy { it.file.path.lowercase() }) {
+            val parent = when (row) {
+                is HgTodoItem -> root
+                is HgFileItem -> dirNode(dirPathOf(row.path), dirNodes, root)
+            }
+            parent.add(DefaultMutableTreeNode(FileNode(row)))
         }
 
         collapseChains(root)
@@ -42,19 +48,19 @@ object ChangesTreeBuilder {
 
     fun refresh(
         root: DefaultMutableTreeNode,
-        items: List<HgFileItem>,
-        scope: List<HgFileItem> = items,
+        rows: List<HgChangeRow>,
+        scope: List<HgChangeRow> = rows,
         isReviewed: (HgFileItem) -> Boolean
     ) {
-        val byKey = HashMap<String, HgFileItem>(items.size)
-        for (item in items) byKey[FileKeys.of(item)] = item
+        val byKey = HashMap<String, HgChangeRow>(rows.size)
+        for (row in rows) byKey[FileKeys.of(row)] = row
         replaceItems(root, byKey)
         aggregate(root, "", isReviewed, UnreviewedDirs.of(scope, isReviewed))
     }
 
-    private fun replaceItems(node: DefaultMutableTreeNode, byKey: Map<String, HgFileItem>) {
+    private fun replaceItems(node: DefaultMutableTreeNode, byKey: Map<String, HgChangeRow>) {
         when (val payload = node.userObject) {
-            is FileNode -> byKey[FileKeys.of(payload.item)]?.let {
+            is FileNode -> byKey[FileKeys.of(payload.row)]?.let {
                 node.userObject = FileNode(it)
             }
             is DirNode -> for (i in 0 until node.childCount) {
@@ -62,6 +68,8 @@ object ChangesTreeBuilder {
             }
         }
     }
+
+    private fun dirPathOf(path: String): String = path.replace('\\', '/').substringBeforeLast('/', "")
 
     private fun dirNode(
         path: String,

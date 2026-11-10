@@ -1,5 +1,6 @@
 package com.narzaru.mercurial.hg
 
+import com.narzaru.mercurial.model.HgFileStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -10,8 +11,28 @@ class HgStatusParserTest {
     fun `parses the status letter and the path`() {
         val items = HgStatusParser.parse("M src/main.kt\nA src/new.kt\n")
 
-        assertEquals(listOf("M", "A"), items.map { it.status })
+        assertEquals(listOf("M", "A"), items.map { it.status.letter })
         assertEquals(listOf("src/main.kt", "src/new.kt"), items.map { it.path })
+    }
+
+    @Test
+    fun `every hg status letter is read into its status`() {
+        val items = HgStatusParser.parse("M a\nA b\nR c\nC d\n! e\n? f\nI g\n")
+
+        assertEquals(
+            listOf(
+                HgFileStatus.MODIFIED, HgFileStatus.ADDED, HgFileStatus.REMOVED, HgFileStatus.CLEAN,
+                HgFileStatus.MISSING, HgFileStatus.UNTRACKED, HgFileStatus.IGNORED
+            ),
+            items.map { it.status }
+        )
+    }
+
+    @Test
+    fun `a line with an unknown status letter is ignored`() {
+        val items = HgStatusParser.parse("X a.kt\nM b.kt\n")
+
+        assertEquals(listOf("b.kt"), items.map { it.path })
     }
 
     @Test
@@ -25,7 +46,7 @@ class HgStatusParserTest {
     fun `a one letter file name is a valid status line`() {
         val items = HgStatusParser.parse("M a\n")
 
-        assertEquals("M", items.single().status)
+        assertEquals("M", items.single().status.letter)
         assertEquals("a", items.single().path)
     }
 
@@ -47,7 +68,7 @@ class HgStatusParserTest {
     fun `files deleted outside hg get the missing status`() {
         val items = HgStatusParser.parse("! gone.kt")
 
-        assertEquals("!", items.single().status)
+        assertEquals("!", items.single().status.letter)
     }
 
     @Test
@@ -72,7 +93,7 @@ class HgStatusParserTest {
         )
 
         val item = items.single()
-        assertEquals(HgStatusParser.RENAMED_STATUS, item.status)
+        assertEquals(HgFileStatus.RENAMED, item.status)
         assertEquals("src/new.kt", item.path)
         assertEquals("src/old.kt", item.copiedFrom)
     }
@@ -85,7 +106,7 @@ class HgStatusParserTest {
 
         assertEquals(listOf("src/new1.kt", "src/new2.kt"), items.map { it.path })
         assertEquals(
-            listOf(HgStatusParser.RENAMED_STATUS, HgStatusParser.RENAMED_STATUS),
+            listOf(HgFileStatus.RENAMED, HgFileStatus.RENAMED),
             items.map { it.status }
         )
     }
@@ -96,7 +117,7 @@ class HgStatusParserTest {
             HgStatusParser.parse("A src/copy.kt\n  src/orig.kt\nM src/orig.kt\n")
         )
 
-        assertEquals(listOf("A", "M"), items.map { it.status })
+        assertEquals(listOf("A", "M"), items.map { it.status.letter })
         assertEquals("src/orig.kt", items[0].copiedFrom)
     }
 
@@ -104,7 +125,7 @@ class HgStatusParserTest {
     fun `a removal without a matching addition stays in the list`() {
         val items = HgStatusParser.foldRenames(HgStatusParser.parse("R src/gone.kt\nA src/new.kt\n"))
 
-        assertEquals(listOf("R", "A"), items.map { it.status })
+        assertEquals(listOf("R", "A"), items.map { it.status.letter })
     }
 
     @Test

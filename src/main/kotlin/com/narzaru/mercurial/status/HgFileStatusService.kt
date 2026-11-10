@@ -3,6 +3,7 @@ package com.narzaru.mercurial.status
 import com.narzaru.mercurial.hg.HgSettings
 import com.narzaru.mercurial.hg.HgPaths
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -15,9 +16,9 @@ import java.io.File
 class HgFileStatusService(private val project: Project) {
 
     @Volatile
-    private var statuses: Map<String, String> = emptyMap()
+    private var statuses: Map<String, HgFileStatus> = emptyMap()
 
-    fun statusOf(file: VirtualFile): String? {
+    fun statusOf(file: VirtualFile): HgFileStatus? {
         if (!HgSettings.statusInTabs) return null
         val snapshot = statuses
         if (snapshot.isEmpty()) return null
@@ -25,9 +26,8 @@ class HgFileStatusService(private val project: Project) {
     }
 
     fun update(repoRoot: File, items: List<HgFileItem>) {
-        val next = HashMap<String, String>(items.size)
+        val next = HashMap<String, HgFileStatus>(items.size)
         for (item in items) {
-            if (item.isTodoItem) continue
             next[HgPaths.key(File(repoRoot, item.path).path)] = item.status
         }
         if (next == statuses) return
@@ -40,7 +40,6 @@ class HgFileStatusService(private val project: Project) {
         val next = HashMap(statuses)
         var changed = false
         for (item in items) {
-            if (item.isTodoItem) continue
             val key = HgPaths.key(File(repoRoot, item.path).path)
             if (next.put(key, item.status) != item.status) changed = true
         }

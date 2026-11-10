@@ -2,6 +2,7 @@ package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -11,7 +12,7 @@ class PartialStatsPlanTest {
 
     private fun item(
         path: String,
-        status: String = "M",
+        status: HgFileStatus = HgFileStatus.MODIFIED,
         base: String = "",
         head: String = "",
         copiedFrom: String = "",
@@ -43,7 +44,7 @@ class PartialStatsPlanTest {
 
     @Test
     fun `a file hidden as unchanged is counted again`() {
-        val action = of(listOf(item("a.kt", status = "♦", unchanged = true)), listOf("a.kt"))
+        val action = of(listOf(item("a.kt", status = HgFileStatus.UNCHANGED, unchanged = true)), listOf("a.kt"))
 
         assertEquals(
             PartialStatsAction.Count(DiffRange("42", ""), listOf("a.kt"), setOf("a.kt")),
@@ -111,7 +112,7 @@ class PartialStatsPlanTest {
 
     @Test
     fun `an untracked file is hashed by content without a diff`() {
-        val action = of(listOf(item("a.kt"), item("new.txt", status = "?")), listOf("new.txt"))
+        val action = of(listOf(item("a.kt"), item("new.txt", status = HgFileStatus.UNTRACKED)), listOf("new.txt"))
 
         assertEquals(
             PartialStatsAction.Count(DiffRange("42", ""), emptyList(), setOf("new.txt"), listOf("new.txt")),
@@ -122,7 +123,7 @@ class PartialStatsPlanTest {
 
     @Test
     fun `untracked files edited along with tracked ones stay out of the diff`() {
-        val action = of(listOf(item("a.kt"), item("new.txt", status = "?")), listOf("a.kt", "new.txt"))
+        val action = of(listOf(item("a.kt"), item("new.txt", status = HgFileStatus.UNTRACKED)), listOf("a.kt", "new.txt"))
 
         assertEquals(
             PartialStatsAction.Count(DiffRange("42", ""), listOf("a.kt"), setOf("a.kt", "new.txt"), listOf("new.txt")),

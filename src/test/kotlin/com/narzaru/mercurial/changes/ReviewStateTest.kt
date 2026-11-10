@@ -1,6 +1,8 @@
 package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
+import com.narzaru.mercurial.model.HgTodoItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -11,7 +13,7 @@ class ReviewStateTest {
     private val store = FakeReviewMarksStore()
     private val state = ReviewState(ReviewMarks(store)).also { it.reload() }
 
-    private fun item(path: String) = HgFileItem(status = "M", path = path)
+    private fun item(path: String) = HgFileItem(status = HgFileStatus.MODIFIED, path = path)
 
     private fun loaded(
         branch: String = "feature",
@@ -36,7 +38,7 @@ class ReviewStateTest {
 
     @Test
     fun `an untracked file loses its mark when edited and gets it back when reverted`() {
-        val file = HgFileItem(status = "?", path = "notes.txt")
+        val file = HgFileItem(status = HgFileStatus.UNTRACKED, path = "notes.txt")
         val content = mutableMapOf("notes.txt" to "c:first")
         fun recount() {
             state.suspend(listOf(state.key(file)))
@@ -246,7 +248,7 @@ class ReviewStateTest {
         loaded(hashes = arrayOf("a.kt" to "h1"))
         state.set(listOf(item("a.kt")), true)
 
-        assertTrue(state.isReviewed(item("a.kt").copy(lineNumber = 12, todoText = "TODO")))
+        assertTrue(state.isReviewed(HgTodoItem(item("a.kt"), lineNumber = 12, text = "TODO").file))
     }
 
     @Test

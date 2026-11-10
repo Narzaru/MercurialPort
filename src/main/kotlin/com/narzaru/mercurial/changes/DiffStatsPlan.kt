@@ -1,9 +1,9 @@
 package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.hg.HgPaths
-import com.narzaru.mercurial.hg.HgStatusParser
 import com.narzaru.mercurial.model.HgDiffStat
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
 
 data class DiffRange(val base: String, val head: String)
 
@@ -12,8 +12,6 @@ object DiffStatsPlan {
     const val MAX_DIFF_PATHS = 200
 
     const val IGNORE_EOL_FLAG = "--ignore-space-at-eol"
-
-    const val UNCHANGED_STATUS = "♦"
 
     const val NO_DIFF_HASH = "none"
 
@@ -52,7 +50,7 @@ object DiffStatsPlan {
     }
 
     fun isHashedByContent(item: HgFileItem): Boolean =
-        item.status == HgStatusParser.UNTRACKED_STATUS && item.headRev.isEmpty()
+        item.status == HgFileStatus.UNTRACKED && item.headRev.isEmpty()
 
     fun contentHashedPaths(files: List<HgFileItem>): List<String> =
         files.filter { isHashedByContent(it) }.map { it.path }
@@ -74,17 +72,17 @@ object DiffStatsPlan {
         val range = rangeOf(item, targetRev)
         if (range in stats && stats[range] == null) return item
         val stat = statOf(item, stats[range].orEmpty())
-        val unchanged = statusOf(item) == HgStatusParser.MODIFIED_STATUS && stat == null
+        val unchanged = statusOf(item) == HgFileStatus.MODIFIED && stat == null
         return item.copy(
-            status = if (unchanged) UNCHANGED_STATUS else statusOf(item),
+            status = if (unchanged) HgFileStatus.UNCHANGED else statusOf(item),
             isUnchanged = unchanged,
             added = stat?.added ?: 0,
             removed = stat?.removed ?: 0
         )
     }
 
-    private fun statusOf(item: HgFileItem): String =
-        if (item.isUnchanged) HgStatusParser.MODIFIED_STATUS else item.status
+    private fun statusOf(item: HgFileItem): HgFileStatus =
+        if (item.isUnchanged) HgFileStatus.MODIFIED else item.status
 
     fun rangeOf(item: HgFileItem, targetRev: String): DiffRange =
         DiffRange(item.baseRev.ifEmpty { targetRev }, item.headRev)

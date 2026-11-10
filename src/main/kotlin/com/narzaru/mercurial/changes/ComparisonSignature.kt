@@ -14,7 +14,7 @@ object ComparisonSignature {
         baseRev: String,
         fragmentsStamp: String
     ): String =
-        files.joinToString("|") { "${it.path}:${it.status}:${it.baseRev}:${it.headRev}" } +
+        files.joinToString("|") { "${it.path}:${it.status.letter}:${it.baseRev}:${it.headRev}" } +
             "|$mode|$baseRev|$fragmentsStamp"
 
     fun fragmentsStamp(

@@ -1,6 +1,7 @@
 package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -8,7 +9,7 @@ import org.junit.Test
 class UnreviewedDirsTest {
 
     private fun file(path: String, unchanged: Boolean = false) =
-        HgFileItem(status = "M", path = path, isUnchanged = unchanged)
+        HgFileItem(status = HgFileStatus.MODIFIED, path = path, isUnchanged = unchanged)
 
     private fun of(files: List<HgFileItem>, reviewed: Set<String> = emptySet()) =
         UnreviewedDirs.of(files) { it.path in reviewed }

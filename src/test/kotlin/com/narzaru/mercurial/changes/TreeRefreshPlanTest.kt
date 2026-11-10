@@ -1,6 +1,8 @@
 package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
+import com.narzaru.mercurial.model.HgTodoItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -11,11 +13,12 @@ class TreeRefreshPlanTest {
 
     private fun file(
         path: String,
-        status: String = "M",
+        status: HgFileStatus = HgFileStatus.MODIFIED,
         added: Int = 0,
-        removed: Int = 0,
-        line: Int = 0
-    ) = HgFileItem(status = status, path = path, added = added, removed = removed, lineNumber = line)
+        removed: Int = 0
+    ) = HgFileItem(status = status, path = path, added = added, removed = removed)
+
+    private fun todo(path: String, line: Int) = HgTodoItem(file(path), lineNumber = line, text = "fix")
 
     @Test
     fun `the same set of files needs no rebuild`() {
@@ -36,7 +39,7 @@ class TreeRefreshPlanTest {
     @Test
     fun `a changed status needs no rebuild`() {
         val shown = listOf(file("src/a.kt"))
-        val next = listOf(file("src/a.kt", status = DiffStatsPlan.UNCHANGED_STATUS))
+        val next = listOf(file("src/a.kt", status = HgFileStatus.UNCHANGED))
 
         assertTrue(TreeRefreshPlan.keepsStructure(shown, next))
     }
@@ -88,8 +91,16 @@ class TreeRefreshPlanTest {
 
     @Test
     fun `TODO lines of one file differ by line number`() {
-        val shown = listOf(file("a.kt", line = 10))
-        val next = listOf(file("a.kt", line = 20))
+        val shown = listOf(todo("a.kt", line = 10))
+        val next = listOf(todo("a.kt", line = 20))
+
+        assertFalse(TreeRefreshPlan.keepsStructure(shown, next))
+    }
+
+    @Test
+    fun `a TODO line in place of its file needs a rebuild`() {
+        val shown = listOf(file("a.kt"))
+        val next = listOf(todo("a.kt", line = 10))
 
         assertFalse(TreeRefreshPlan.keepsStructure(shown, next))
     }

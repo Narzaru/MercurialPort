@@ -2,10 +2,11 @@ package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.hg.HgPaths
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgTodoItem
 
 object TodoScan {
 
-    fun changed(previous: List<HgFileItem>, current: List<HgFileItem>): Boolean =
+    fun changed(previous: List<HgTodoItem>, current: List<HgTodoItem>): Boolean =
         signature(previous) != signature(current)
 
     fun covers(files: List<HgFileItem>, repoRoot: String, changedPath: String): Boolean {
@@ -13,8 +14,8 @@ object TodoScan {
         return files.any { HgPaths.key(it.path) == key }
     }
 
-    private fun signature(items: List<HgFileItem>): List<String> = items.map {
-        listOf(HgPaths.key(it.path), it.lineNumber.toString(), it.status, it.todoText.orEmpty())
+    private fun signature(items: List<HgTodoItem>): List<String> = items.map {
+        listOf(HgPaths.key(it.file.path), it.lineNumber.toString(), it.file.status.letter, it.text)
             .joinToString("|")
     }
 }

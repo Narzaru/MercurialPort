@@ -78,30 +78,57 @@ enum class HgDisplayMode(
 
 enum class HgListMode { FILES, TODO }
 
+enum class HgFileStatus(val letter: String) {
+    MODIFIED("M"),
+    ADDED("A"),
+    REMOVED("R"),
+    CLEAN("C"),
+    MISSING("!"),
+    UNTRACKED("?"),
+    IGNORED("I"),
+    RENAMED("→"),
+    UNCHANGED("♦");
+
+    companion object {
+
+        private val BY_LETTER: Map<Char, HgFileStatus> = entries.associateBy { it.letter.single() }
+
+        fun ofLetter(letter: Char): HgFileStatus? = BY_LETTER[letter]
+    }
+}
+
+sealed interface HgChangeRow {
+    val file: HgFileItem
+}
+
 data class HgFileItem(
-    val status: String,
+    val status: HgFileStatus,
     val path: String,
     val isUnchanged: Boolean = false,
-    val todoText: String? = null,
-    val lineNumber: Int = 0,
     val added: Int = 0,
     val removed: Int = 0,
     val copiedFrom: String = "",
 
     val baseRev: String = "",
     val headRev: String = ""
-) {
+) : HgChangeRow {
+
+    override val file: HgFileItem get() = this
 
     val basePath: String get() = copiedFrom.ifEmpty { path }
 
     val names: List<String> get() = if (copiedFrom.isEmpty()) listOf(path) else listOf(path, copiedFrom)
 
-    val isTodoItem: Boolean get() = lineNumber > 0
-
     val name: String get() = path.substringAfterLast('/').substringAfterLast('\\')
+}
 
-    val displayPath: String
-        get() = if (isTodoItem) "${File(path).name}:$lineNumber" else path
+data class HgTodoItem(
+    override val file: HgFileItem,
+    val lineNumber: Int,
+    val text: String
+) : HgChangeRow {
+
+    val displayPath: String get() = "${File(file.path).name}:$lineNumber"
 }
 
 data class HgDiffStat(val added: Int, val removed: Int, val hash: String = "")

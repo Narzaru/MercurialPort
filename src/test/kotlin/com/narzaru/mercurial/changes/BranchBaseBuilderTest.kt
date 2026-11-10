@@ -4,6 +4,7 @@ import com.narzaru.mercurial.hg.HgContentCache
 import com.narzaru.mercurial.hg.HgResult
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -11,7 +12,7 @@ import org.junit.Test
 
 class BranchBaseBuilderTest {
 
-    private val item = HgFileItem(status = "M", path = "a.txt", headRev = "n2")
+    private val item = HgFileItem(status = HgFileStatus.MODIFIED, path = "a.txt", headRev = "n2")
 
     private val head = "a\nB2\nC2\nd"
 
@@ -159,7 +160,7 @@ class BranchBaseBuilderTest {
 
     @Test
     fun `a file added inside the range is not looked up in the base revision`() {
-        val added = HgFileItem(status = "A", path = "a.txt", headRev = "n2")
+        val added = HgFileItem(status = HgFileStatus.ADDED, path = "a.txt", headRev = "n2")
         val hg = FakeHg(mapOf(diffOfFirst to ok(""), diffOfSecond to ok(patchOfSecond)))
         val warnings = ArrayList<String>()
         val base = builder(hg, widen = true, warn = { warnings.add(it) }).read(added, head)

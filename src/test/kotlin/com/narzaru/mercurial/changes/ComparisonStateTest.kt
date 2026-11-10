@@ -1,18 +1,17 @@
 package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ComparisonStateTest {
 
-    private fun item(path: String, unchanged: Boolean = false, line: Int = 0) = HgFileItem(
-        status = "M",
+    private fun item(path: String, unchanged: Boolean = false) = HgFileItem(
+        status = HgFileStatus.MODIFIED,
         path = path,
-        isUnchanged = unchanged,
-        lineNumber = line
+        isUnchanged = unchanged
     )
 
     @Test
@@ -45,12 +44,6 @@ class ComparisonStateTest {
     }
 
     @Test
-    fun `todo rows stay out of the file index`() {
-        val state = ComparisonState().withItems(listOf(item("src/a.kt", line = 12)))
-        assertTrue(state.itemsByPath.isEmpty())
-    }
-
-    @Test
     fun `new items replace the previous ones`() {
         val state = ComparisonState().withItems(listOf(item("a.kt"))).withItems(listOf(item("b.kt")))
         assertNull(state.changedItemAt("a.kt"))
@@ -72,6 +65,5 @@ class ComparisonStateTest {
         val state = ComparisonState().withItems(listOf(item("a.kt")))
 
         assertEquals(state, state.withItemsMerged(emptyList()))
-        assertEquals(state, state.withItemsMerged(listOf(item("todo.kt", line = 12))))
     }
 }

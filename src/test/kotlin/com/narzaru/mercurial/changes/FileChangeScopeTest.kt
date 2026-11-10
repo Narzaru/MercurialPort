@@ -1,6 +1,7 @@
 package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -10,7 +11,7 @@ class FileChangeScopeTest {
 
     private val root = "C:/repo"
 
-    private fun file(path: String, status: String = "M") = HgFileItem(status = status, path = path)
+    private fun file(path: String, status: HgFileStatus = HgFileStatus.MODIFIED) = HgFileItem(status = status, path = path)
 
     private val files = listOf(file("src/a.kt"), file("src/b.kt"), file("docs/c.md"))
 

@@ -1,6 +1,7 @@
 package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -10,10 +11,10 @@ class ChangesDiffSourceTest {
 
     private val repoRoot = File("repo").absoluteFile
 
-    private val changed = HgFileItem(status = "M", path = "src/A.kt")
+    private val changed = HgFileItem(status = HgFileStatus.MODIFIED, path = "src/A.kt")
 
     private val state = ComparisonState(repoRoot = repoRoot).withItems(
-        listOf(changed, HgFileItem(status = "M", path = "same.kt", isUnchanged = true))
+        listOf(changed, HgFileItem(status = HgFileStatus.MODIFIED, path = "same.kt", isUnchanged = true))
     )
 
     @Test

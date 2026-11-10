@@ -6,6 +6,7 @@ import com.narzaru.mercurial.hg.HgResult
 import com.narzaru.mercurial.hg.HgStatusParser
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
 
 data class ChangesResult(
     val files: List<HgFileItem>,
@@ -132,7 +133,7 @@ class ChangesLoader(
         }
 
         val all = HgStatusParser.foldRenames(HgStatusParser.parse(statusRes.stdout))
-        val files = if (scope == null) all else all.filter { it.status == HgStatusParser.UNTRACKED_STATUS || inScope(it, scope) }
+        val files = if (scope == null) all else all.filter { it.status == HgFileStatus.UNTRACKED || inScope(it, scope) }
         val range = DiffRange(targetRev, "")
         val statsPaths =
             if (scope == null) emptyMap() else DiffStatsPlan.pathsByRange(listOf(range), files, targetRev)

@@ -49,7 +49,7 @@
 | `history` | Тул-окно **Hg File History** — `hg log -f` по файлу |
 | `export` | Действия «Hg Export» в меню Tools |
 | `status` | Статусы файлов вне тул-окна — буква состояния в заголовке вкладки редактора |
-| `model` | Модели данных (`HgFileItem`, `HgDiffStat`, режимы) |
+| `model` | Модели данных: строка списка `HgChangeRow` — файл `HgFileItem` или TODO `HgTodoItem`, статус `HgFileStatus`, `HgDiffStat`, режимы |
 
 Регистрация тул-окон, страницы настроек и действий — `src/main/resources/META-INF/plugin.xml`.
 

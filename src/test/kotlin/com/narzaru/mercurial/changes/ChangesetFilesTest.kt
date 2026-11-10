@@ -1,6 +1,7 @@
 package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.hg.HgStatusParser
+import com.narzaru.mercurial.model.HgFileStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -41,9 +42,9 @@ class ChangesetFilesTest {
 
         assertEquals(
             listOf("M f1.txt", "→ f2new.txt", "A new1.txt", "R f3.txt"),
-            items.map { "${it.status} ${it.path}" }
+            items.map { "${it.status.letter} ${it.path}" }
         )
-        assertEquals("f2.txt", items.single { it.status == HgStatusParser.RENAMED_STATUS }.copiedFrom)
+        assertEquals("f2.txt", items.single { it.status == HgFileStatus.RENAMED }.copiedFrom)
     }
 
     @Test
@@ -57,8 +58,8 @@ class ChangesetFilesTest {
         """.trimIndent()
         val items = ChangesetFiles.parse(log).getValue("63464ce07e0b")
 
-        assertEquals(listOf("M f1.txt", "A f6copy.txt"), items.map { "${it.status} ${it.path}" })
-        assertEquals("f6.txt", items.single { it.status == HgStatusParser.ADDED_STATUS }.copiedFrom)
+        assertEquals(listOf("M f1.txt", "A f6copy.txt"), items.map { "${it.status.letter} ${it.path}" })
+        assertEquals("f6.txt", items.single { it.status == HgFileStatus.ADDED }.copiedFrom)
     }
 
     @Test
@@ -73,9 +74,9 @@ class ChangesetFilesTest {
         val parsed = ChangesetFiles.parse(log)
 
         assertEquals(listOf("aaa1111", "bbb2222", "ccc3333"), parsed.keys.toList())
-        assertEquals(listOf("M a.txt"), parsed.getValue("aaa1111").map { "${it.status} ${it.path}" })
+        assertEquals(listOf("M a.txt"), parsed.getValue("aaa1111").map { "${it.status.letter} ${it.path}" })
         assertTrue(parsed.getValue("bbb2222").isEmpty())
-        assertEquals(listOf("R c.txt"), parsed.getValue("ccc3333").map { "${it.status} ${it.path}" })
+        assertEquals(listOf("R c.txt"), parsed.getValue("ccc3333").map { "${it.status.letter} ${it.path}" })
     }
 
     @Test

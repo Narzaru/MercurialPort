@@ -4,6 +4,7 @@ import com.narzaru.mercurial.hg.HgFailure
 import com.narzaru.mercurial.hg.HgPaths
 import com.narzaru.mercurial.hg.HgResult
 import com.narzaru.mercurial.hg.HgStatusParser
+import com.narzaru.mercurial.model.HgFileStatus
 
 sealed interface UnlistedPathsAction {
 
@@ -34,10 +35,10 @@ object UnlistedPathsProbe {
     const val UNFINISHED = "hg status did not finish"
 
     private val LISTABLE = setOf(
-        HgStatusParser.MODIFIED_STATUS,
-        HgStatusParser.ADDED_STATUS,
-        HgStatusParser.REMOVED_STATUS,
-        HgStatusParser.MISSING_STATUS
+        HgFileStatus.MODIFIED,
+        HgFileStatus.ADDED,
+        HgFileStatus.REMOVED,
+        HgFileStatus.MISSING
     )
 
     fun of(keys: Collection<String>, quiet: Set<String>): UnlistedPathsAction {
@@ -74,6 +75,6 @@ object UnlistedPathsProbe {
         return next.asSequence().drop(next.size - MAX_QUIET_PATHS).toCollection(LinkedHashSet())
     }
 
-    private fun matters(status: String, untracked: Boolean): Boolean =
-        status in LISTABLE || (untracked && status == HgStatusParser.UNTRACKED_STATUS)
+    private fun matters(status: HgFileStatus, untracked: Boolean): Boolean =
+        status in LISTABLE || (untracked && status == HgFileStatus.UNTRACKED)
 }

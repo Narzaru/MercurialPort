@@ -1,6 +1,9 @@
 package com.narzaru.mercurial.changes
 
+import com.narzaru.mercurial.model.HgChangeRow
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
+import com.narzaru.mercurial.model.HgTodoItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -10,10 +13,13 @@ import javax.swing.tree.DefaultMutableTreeNode
 
 class ChangesTreeBuilderTest {
 
-    private fun file(path: String, added: Int = 0, removed: Int = 0, line: Int = 0) =
-        HgFileItem(status = "M", path = path, added = added, removed = removed, lineNumber = line)
+    private fun file(path: String, added: Int = 0, removed: Int = 0) =
+        HgFileItem(status = HgFileStatus.MODIFIED, path = path, added = added, removed = removed)
 
-    private fun build(items: List<HgFileItem>, reviewed: Set<String> = emptySet()) =
+    private fun todo(path: String, line: Int, text: String = "fix") =
+        HgTodoItem(file(path), lineNumber = line, text = text)
+
+    private fun build(items: List<HgChangeRow>, reviewed: Set<String> = emptySet()) =
         ChangesTreeBuilder.build(items) { it.path in reviewed }
 
     private val DefaultMutableTreeNode.children: List<DefaultMutableTreeNode>
@@ -103,7 +109,7 @@ class ChangesTreeBuilderTest {
 
     @Test
     fun `an unchanged file is counted as reviewed`() {
-        val same = HgFileItem(status = DiffStatsPlan.UNCHANGED_STATUS, path = "src/same.kt", isUnchanged = true)
+        val same = HgFileItem(status = HgFileStatus.UNCHANGED, path = "src/same.kt", isUnchanged = true)
         val root = build(listOf(file("src/a.kt"), same), reviewed = setOf("src/a.kt"))
 
         val src = root.children.single().dir
@@ -167,10 +173,40 @@ class ChangesTreeBuilderTest {
 
     @Test
     fun `TODO lines go to the root as a flat list`() {
-        val root = build(listOf(file("src/deep/a.kt", line = 10), file("src/deep/a.kt", line = 20)))
+        val root = build(listOf(todo("src/deep/a.kt", line = 10), todo("src/deep/a.kt", line = 20)))
 
         assertEquals(2, root.childCount)
         assertTrue(root.children.all { it.userObject is FileNode })
+    }
+
+    @Test
+    fun `a TODO row is shown under the name of its file`() {
+        val root = build(listOf(todo("src/deep/a.kt", line = 10)))
+
+        assertEquals("a.kt\n", render(root))
+    }
+
+    @Test
+    fun `refresh tells the TODO rows of one file apart by line`() {
+        val root = build(listOf(todo("src/a.kt", line = 3, text = "one"), todo("src/a.kt", line = 7, text = "two")))
+
+        ChangesTreeBuilder.refresh(
+            root,
+            listOf(todo("src/a.kt", line = 7, text = "two later"), todo("src/a.kt", line = 3, text = "one later"))
+        ) { false }
+
+        assertEquals(
+            listOf("one later", "two later"),
+            root.children.map { ((it.userObject as FileNode).row as HgTodoItem).text }
+        )
+    }
+
+    @Test
+    fun `filesOf of a TODO row returns the file it was found in`() {
+        val todo = todo("src/a.kt", line = 3)
+        val root = build(listOf(todo))
+
+        assertEquals(listOf(todo.file), ChangesTreeBuilder.filesOf(root))
     }
 
     @Test

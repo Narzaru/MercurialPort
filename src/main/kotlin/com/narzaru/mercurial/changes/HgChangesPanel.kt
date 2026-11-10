@@ -11,10 +11,13 @@ import com.narzaru.mercurial.hg.HgResult
 import com.narzaru.mercurial.hg.HgSettings
 import com.narzaru.mercurial.hg.HgSettingsConfigurable
 import com.narzaru.mercurial.history.HgFileHistoryService
+import com.narzaru.mercurial.model.HgChangeRow
 import com.narzaru.mercurial.model.HgDiffStat
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
 import com.narzaru.mercurial.model.HgListMode
+import com.narzaru.mercurial.model.HgTodoItem
 import com.narzaru.mercurial.status.HgFileStatusService
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
@@ -138,7 +141,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private var toolbar: ActionToolbar? = null
     private val sourceFiles = ArrayList<HgFileItem>()
 
-    private var currentTodoItems: List<HgFileItem> = emptyList()
+    private var currentTodoItems: List<HgTodoItem> = emptyList()
 
     @Volatile
     private var disposed = false
@@ -191,7 +194,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private val treeModel = ListTreeTableModelOnColumns(treeRoot, buildColumns())
 
     private var renderedRoot = treeRoot
-    private var renderedFiles: List<HgFileItem> = emptyList()
+    private var renderedFiles: List<HgChangeRow> = emptyList()
 
     private val tree = object : TreeTable(treeModel) {
         override fun getToolTipText(event: MouseEvent): String? = tooltipAt(event)
@@ -241,21 +244,21 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         activateRow(row)
     }
 
-    private fun itemAt(row: Int): HgFileItem? = (nodeAt(row)?.userObject as? FileNode)?.item
+    private fun itemAt(row: Int): HgChangeRow? = (nodeAt(row)?.userObject as? FileNode)?.row
 
     private fun rowOf(fileKey: String): Int? =
         (0 until tree.rowCount).firstOrNull { row -> itemAt(row)?.let { FileKeys.of(it) } == fileKey }
 
-    private fun activateItem(item: HgFileItem) {
-        lastActivatedPath = HgPaths.key(item.path)
-        syncFileHistory(item)
-        if (item.isTodoItem) return
+    private fun activateItem(item: HgChangeRow) {
+        lastActivatedPath = HgPaths.key(item.file.path)
+        syncFileHistory(item.file)
+        if (item !is HgFileItem) return
         diffFile(item)
         if (settings.markReviewedOnOpen && review.set(listOf(item), true)) renderReviewMarks()
         prefetchAround(item)
     }
 
-    private fun visibleFiles(): List<HgFileItem> = (0 until tree.rowCount).mapNotNull { itemAt(it) }
+    private fun visibleFiles(): List<HgChangeRow> = (0 until tree.rowCount).mapNotNull { itemAt(it) }
 
     private fun onKeyboardSelection(row: Int) {
         if (!uiReady) return
@@ -287,7 +290,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun selectOpenedFile(filePath: String) {
         val repoRoot = comparison.repoRoot ?: return
         val key = HgPaths.keyRelativeTo(filePath, repoRoot) ?: return
-        val rowKeys = (0 until tree.rowCount).map { row -> itemAt(row)?.let { HgPaths.key(it.path) } }
+        val rowKeys = (0 until tree.rowCount).map { row -> itemAt(row)?.let { HgPaths.key(it.file.path) } }
         val target = OpenedFileRow.of(rowKeys, tree.selectedRows.toSet(), key)
         if (target == null) {
             tree.selectionModel.clearSelection()
@@ -345,7 +348,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         ) { setShowUntracked(!showUntracked) })
         group.add(toggle(
             "Show Unchanged",
-            "Show files with no real changes (${DiffStatsPlan.UNCHANGED_STATUS})",
+            "Show files with no real changes (${HgFileStatus.UNCHANGED.letter})",
             AllIcons.Vcs.Equal,
             { showUnchanged }) { setShowUnchanged(!showUnchanged) })
         group.add(toggle("Filter", "Show the Filter/Exclude fields", AllIcons.General.Filter,
@@ -703,9 +706,9 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             if (clickCount == 2 && !onTreeColumn) toggleExpand(viewRow)
             return
         }
-        val item = (payload as? FileNode)?.item ?: return
+        val item = (payload as? FileNode)?.row ?: return
         selectionAlarm.cancelAllRequests()
-        val activated = HgPaths.key(item.path) == lastActivatedPath
+        val activated = HgPaths.key(item.file.path) == lastActivatedPath
         when (ClickGesture.onFile(clickCount, e.modifiersEx, activated)) {
             FileClickAction.IGNORE -> return
             FileClickAction.ACTIVATE -> activateRow(viewRow)
@@ -1137,11 +1140,11 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         project.service<HgFileStatusService>().merge(repoRoot, items)
     }
 
-    private fun listedFiles(): List<HgFileItem> = if (listMode == HgListMode.TODO) currentTodoItems else sourceFiles
+    private fun listedFiles(): List<HgChangeRow> = if (listMode == HgListMode.TODO) currentTodoItems else sourceFiles
 
-    private fun shownFiles(): List<HgFileItem> {
+    private fun shownFiles(): List<HgChangeRow> {
         val filter = PathFilter(filterField.text.orEmpty(), excludeField.text.orEmpty())
-        return listedFiles().filter { (showUnchanged || !it.isUnchanged) && filter.accepts(it.path) }
+        return listedFiles().filter { (showUnchanged || !it.file.isUnchanged) && filter.accepts(it.file.path) }
     }
 
     private fun renderReviewMarks() = renderFiltered(reuseTree = true)
@@ -1204,7 +1207,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
     private fun selectedFileKeys(): Set<String> = tree.selectedRows.toList()
         .mapNotNull { itemAt(it) }
-        .map { HgPaths.key(it.path) }
+        .map { HgPaths.key(it.file.path) }
         .toSet()
 
     private fun restoreSelection(keys: Set<String>) {
@@ -1212,12 +1215,12 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         tree.selectionModel.clearSelection()
         for (row in 0 until tree.rowCount) {
             val item = itemAt(row) ?: continue
-            if (HgPaths.key(item.path) in keys) tree.selectionModel.addSelectionInterval(row, row)
+            if (HgPaths.key(item.file.path) in keys) tree.selectionModel.addSelectionInterval(row, row)
         }
     }
 
-    private fun updateSummary(items: List<HgFileItem>) {
-        val files = items.distinctBy { review.key(it) }
+    private fun updateSummary(items: List<HgChangeRow>) {
+        val files = items.map { it.file }.distinctBy { review.key(it) }
         summaryLabel.text =
             StatusTextFormatter.summary(files, files.count { review.isReviewed(it) }, statsScheduler.loading)
     }
@@ -1342,7 +1345,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         val sources = ArrayList(sourceFiles)
         val requestId = ++todoScanId
         ApplicationManager.getApplication().executeOnPooledThread {
-            val todoItems = ArrayList<HgFileItem>()
+            val todoItems = ArrayList<HgTodoItem>()
             trace.timed("scan todos") {
                 for (source in sources) {
                     val text = readFileText(File(repoRoot, source.path))
@@ -1373,10 +1376,11 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         }
     }
 
-    private fun openFile(item: HgFileItem) {
+    private fun openFile(row: HgChangeRow) {
+        val item = row.file
         val repoRoot = comparison.repoRoot ?: return
         val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(File(repoRoot, item.path)) ?: return
-        val line = CaretTransfer.fileTarget(null, item.lineNumber)
+        val line = (row as? HgTodoItem)?.let { CaretTransfer.fileTarget(null, it.lineNumber) }
         NavigationHistory.record(project) {
             if (line != null) {
                 OpenFileDescriptor(project, vf, line, 0).navigate(true)
@@ -1440,7 +1444,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         val state = comparison
         if (state.repoRoot == null) return
         val items = PrefetchPlan.around(visibleFiles(), FileKeys.of(activated), FileKeys::of)
-            .filterNot { it.isTodoItem }
+            .filterIsInstance<HgFileItem>()
         diffSource.prefetch(state, items)
     }
 

@@ -3,6 +3,7 @@ package com.narzaru.mercurial.changes
 import com.narzaru.mercurial.model.ChangesetsFragments
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
@@ -10,8 +11,8 @@ import org.junit.Test
 class ComparisonSignatureTest {
 
     private val files = listOf(
-        HgFileItem(status = "M", path = "src/a.kt", baseRev = "10", headRev = "12"),
-        HgFileItem(status = "A", path = "src/b.kt")
+        HgFileItem(status = HgFileStatus.MODIFIED, path = "src/a.kt", baseRev = "10", headRev = "12"),
+        HgFileItem(status = HgFileStatus.ADDED, path = "src/b.kt")
     )
 
     private val stamp = ComparisonSignature.fragmentsStamp(
@@ -48,7 +49,7 @@ class ComparisonSignatureTest {
 
     @Test
     fun `a changed status or revision of a file changes the signature`() {
-        assertNotEquals(signature(), signature(files = listOf(files[0].copy(status = "R"), files[1])))
+        assertNotEquals(signature(), signature(files = listOf(files[0].copy(status = HgFileStatus.REMOVED), files[1])))
         assertNotEquals(signature(), signature(files = listOf(files[0].copy(headRev = "13"), files[1])))
     }
 

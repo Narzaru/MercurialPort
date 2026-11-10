@@ -1,7 +1,7 @@
 package com.narzaru.mercurial.changes
 
-import com.narzaru.mercurial.hg.HgStatusParser
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
 
 data class DiffSidesPlan(
     val needsBase: Boolean,
@@ -29,7 +29,7 @@ data class DiffSidesPlan(
         }
 
         fun isNew(item: HgFileItem): Boolean =
-            (item.status == HgStatusParser.ADDED_STATUS || item.status == HgStatusParser.UNTRACKED_STATUS) &&
+            (item.status == HgFileStatus.ADDED || item.status == HgFileStatus.UNTRACKED) &&
                 item.copiedFrom.isEmpty()
 
         private fun hasBaseSide(item: HgFileItem, baseRev: String): Boolean =

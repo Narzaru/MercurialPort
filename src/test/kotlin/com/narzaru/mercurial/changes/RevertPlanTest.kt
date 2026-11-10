@@ -2,6 +2,7 @@ package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -9,10 +10,10 @@ import org.junit.Test
 
 class RevertPlanTest {
 
-    private val single = listOf(HgFileItem(status = "M", path = "src/a.kt"))
+    private val single = listOf(HgFileItem(status = HgFileStatus.MODIFIED, path = "src/a.kt"))
 
     private fun many(count: Int) =
-        (1..count).map { HgFileItem(status = "M", path = "src/file$it.kt") }
+        (1..count).map { HgFileItem(status = HgFileStatus.MODIFIED, path = "src/file$it.kt") }
 
     @Test
     fun `a prompt for uncommitted changes does not mention a revision`() {
@@ -72,7 +73,7 @@ class RevertPlanTest {
 
     @Test
     fun `a renamed file carries its source along`() {
-        val renamed = listOf(HgFileItem(status = "A", path = "src/b.kt", copiedFrom = "src/a.kt"))
+        val renamed = listOf(HgFileItem(status = HgFileStatus.ADDED, path = "src/b.kt", copiedFrom = "src/a.kt"))
 
         assertEquals(listOf("src/b.kt", "src/a.kt"), RevertPlan.affectedPaths(renamed))
         assertEquals(

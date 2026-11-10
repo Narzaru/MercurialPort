@@ -40,7 +40,7 @@ class ChangesLoaderTest {
         assertEquals(".", result.targetRev)
         assertNull(result.error)
         assertEquals("Uncommitted in: feature (abc123) \"Work in progress\"", result.statusText)
-        assertEquals(listOf("M src/A.kt", "A src/B.kt"), result.files.map { "${it.status} ${it.path}" })
+        assertEquals(listOf("M src/A.kt", "A src/B.kt"), result.files.map { "${it.status.letter} ${it.path}" })
         assertEquals(listOf(DiffRange(".", "")), result.statsRanges)
         assertEquals(emptyMap<String, List<String>>(), result.revsByFile)
     }
@@ -55,7 +55,7 @@ class ChangesLoaderTest {
         )
         val result = load(hg, HgDisplayMode.UNCOMMITTED, untracked = true)
 
-        assertEquals(listOf("? src/New.kt"), result.files.map { "${it.status} ${it.path}" })
+        assertEquals(listOf("? src/New.kt"), result.files.map { "${it.status.letter} ${it.path}" })
     }
 
     @Test
@@ -106,7 +106,7 @@ class ChangesLoaderTest {
             ),
             hg.calls
         )
-        assertEquals(listOf("M src/A.kt"), result.files.map { "${it.status} ${it.path}" })
+        assertEquals(listOf("M src/A.kt"), result.files.map { "${it.status.letter} ${it.path}" })
         assertEquals("feature", result.branch)
         assertEquals(listOf("n1", "n2"), result.revisions.map { it.node })
         assertEquals(mapOf(DiffRange(branchPoint, "") to listOf("src/A.kt")), result.statsPaths)
@@ -240,7 +240,7 @@ class ChangesLoaderTest {
         )
         assertEquals(
             listOf("M src/A.kt p1(n1)..n1", "A src/B.kt p1(n2)..n2"),
-            result.files.map { "${it.status} ${it.path} ${it.baseRev}..${it.headRev}" }
+            result.files.map { "${it.status.letter} ${it.path} ${it.baseRev}..${it.headRev}" }
         )
         assertEquals(
             listOf(DiffRange("p1(n1)", "n1"), DiffRange("p1(n2)", "n2")),
@@ -278,7 +278,7 @@ class ChangesLoaderTest {
         )
         assertEquals(
             listOf("M src/A.kt p1(n1)..n2", "A src/B.kt p1(n2)..n2"),
-            result.files.map { "${it.status} ${it.path} ${it.baseRev}..${it.headRev}" }
+            result.files.map { "${it.status.letter} ${it.path} ${it.baseRev}..${it.headRev}" }
         )
         assertEquals(mapOf("src/a.kt" to listOf("n1", "n2"), "src/b.kt" to listOf("n2")), result.revsByFile)
     }
@@ -299,7 +299,7 @@ class ChangesLoaderTest {
         val result = load(hg, HgDisplayMode.CHANGESETS)
 
         assertEquals(listOf("A src/B.kt p1(n2)..n2"), result.files.map {
-            "${it.status} ${it.path} ${it.baseRev}..${it.headRev}"
+            "${it.status.letter} ${it.path} ${it.baseRev}..${it.headRev}"
         })
         assertEquals(listOf(DiffRange("p1(n2)", "n2")), result.statsRanges)
         assertEquals(mapOf(DiffRange("p1(n2)", "n2") to listOf("src/B.kt")), result.statsPaths)
@@ -334,7 +334,7 @@ class ChangesLoaderTest {
             hg.calls
         )
         assertEquals(listOf("→ src/New.kt p1(n1)..n2"), result.files.map {
-            "${it.status} ${it.path} ${it.baseRev}..${it.headRev}"
+            "${it.status.letter} ${it.path} ${it.baseRev}..${it.headRev}"
         })
         assertEquals(listOf(DiffRange("p1(n1)", "n2")), result.statsRanges)
         assertEquals(
@@ -391,7 +391,7 @@ class ChangesLoaderTest {
                 "R src/Gone.kt p1(n1)..n1",
                 "R src/Extra.kt p1(n2)..n2"
             ),
-            result.files.map { "${it.status} ${it.path} ${it.baseRev}..${it.headRev}" }
+            result.files.map { "${it.status.letter} ${it.path} ${it.baseRev}..${it.headRev}" }
         )
         assertEquals(
             setOf("src/new.kt", "src/old.kt", "src/gone.kt", "src/kept.kt", "src/extra.kt"),
@@ -450,7 +450,7 @@ class ChangesLoaderTest {
             hg.calls
         )
         assertNull(result.error)
-        assertEquals(listOf("M src/A.kt"), result.files.map { "${it.status} ${it.path}" })
+        assertEquals(listOf("M src/A.kt"), result.files.map { "${it.status.letter} ${it.path}" })
     }
 
     @Test

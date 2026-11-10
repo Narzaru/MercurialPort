@@ -1,6 +1,6 @@
 package com.narzaru.mercurial.changes
 
-import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgChangeRow
 import javax.swing.tree.DefaultMutableTreeNode
 
 object TreeRefreshPlan {
@@ -20,7 +20,7 @@ object TreeRefreshPlan {
     fun expandsAfterRebuild(dirPath: String, collapsed: Set<String>?): Boolean =
         collapsed == null || dirPath !in collapsed
 
-    fun keepsStructure(shown: List<HgFileItem>, next: List<HgFileItem>): Boolean {
+    fun keepsStructure(shown: List<HgChangeRow>, next: List<HgChangeRow>): Boolean {
         if (shown.size != next.size) return false
         for (index in shown.indices) {
             if (FileKeys.of(shown[index]) != FileKeys.of(next[index])) return false

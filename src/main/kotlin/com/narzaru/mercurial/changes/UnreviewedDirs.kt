@@ -1,6 +1,7 @@
 package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.hg.HgPaths
+import com.narzaru.mercurial.model.HgChangeRow
 import com.narzaru.mercurial.model.HgFileItem
 
 class UnreviewedDirs private constructor(private val keys: Set<String>) {
@@ -9,9 +10,10 @@ class UnreviewedDirs private constructor(private val keys: Set<String>) {
 
     companion object {
 
-        fun of(files: List<HgFileItem>, isReviewed: (HgFileItem) -> Boolean): UnreviewedDirs {
+        fun of(rows: List<HgChangeRow>, isReviewed: (HgFileItem) -> Boolean): UnreviewedDirs {
             val keys = HashSet<String>()
-            for (file in files) {
+            for (row in rows) {
+                val file = row.file
                 if (file.isUnchanged || isReviewed(file)) continue
                 var dir = parentOf(HgPaths.key(file.path))
                 while (dir.isNotEmpty() && keys.add(dir)) dir = parentOf(dir)

@@ -2,6 +2,7 @@ package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.model.HgDiffStat
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -10,7 +11,7 @@ import org.junit.Test
 class DiffStatsPlanTest {
 
     private fun item(path: String, base: String = "", head: String = "", copiedFrom: String = "") =
-        HgFileItem(status = "M", path = path, copiedFrom = copiedFrom, baseRev = base, headRev = head)
+        HgFileItem(status = HgFileStatus.MODIFIED, path = path, copiedFrom = copiedFrom, baseRev = base, headRev = head)
 
     @Test
     fun `a file without its own revisions falls back to the target revision`() {
@@ -122,24 +123,24 @@ class DiffStatsPlanTest {
         assertEquals(3, counted.added)
         assertEquals(1, counted.removed)
         assertFalse(counted.isUnchanged)
-        assertEquals("M", counted.status)
+        assertEquals("M", counted.status.letter)
     }
 
     @Test
     fun `a modified file without stats becomes unchanged`() {
         val counted = DiffStatsPlan.applyStats(listOf(item("a.kt")), emptyMap(), "42").single()
         assertTrue(counted.isUnchanged)
-        assertEquals(DiffStatsPlan.UNCHANGED_STATUS, counted.status)
+        assertEquals(HgFileStatus.UNCHANGED, counted.status)
         assertEquals(0, counted.added)
         assertEquals(0, counted.removed)
     }
 
     @Test
     fun `an added file without stats keeps its status`() {
-        val added = HgFileItem(status = "A", path = "a.kt")
+        val added = HgFileItem(status = HgFileStatus.ADDED, path = "a.kt")
         val counted = DiffStatsPlan.applyStats(listOf(added), emptyMap(), "42").single()
         assertFalse(counted.isUnchanged)
-        assertEquals("A", counted.status)
+        assertEquals("A", counted.status.letter)
     }
 
     @Test
@@ -219,32 +220,32 @@ class DiffStatsPlanTest {
         val counted = DiffStatsPlan.applyStatsToKeys(files, emptyMap(), "42", setOf("a.kt")).single()
 
         assertTrue(counted.isUnchanged)
-        assertEquals(DiffStatsPlan.UNCHANGED_STATUS, counted.status)
+        assertEquals(HgFileStatus.UNCHANGED, counted.status)
         assertEquals(0, counted.added)
     }
 
     @Test
     fun `an unchanged file edited again is modified once more`() {
         val files = listOf(
-            item("a.kt").copy(status = DiffStatsPlan.UNCHANGED_STATUS, isUnchanged = true)
+            item("a.kt").copy(status = HgFileStatus.UNCHANGED, isUnchanged = true)
         )
         val stats = mapOf(DiffRange("42", "") to mapOf("a.kt" to HgDiffStat(2, 1)))
 
         val counted = DiffStatsPlan.applyStatsToKeys(files, stats, "42", setOf("a.kt")).single()
 
         assertFalse(counted.isUnchanged)
-        assertEquals("M", counted.status)
+        assertEquals("M", counted.status.letter)
         assertEquals(2, counted.added)
     }
 
     @Test
     fun `an added file counted alone never turns unchanged`() {
-        val files = listOf(HgFileItem(status = "A", path = "a.kt", added = 4))
+        val files = listOf(HgFileItem(status = HgFileStatus.ADDED, path = "a.kt", added = 4))
 
         val counted = DiffStatsPlan.applyStatsToKeys(files, emptyMap(), "42", setOf("a.kt")).single()
 
         assertFalse(counted.isUnchanged)
-        assertEquals("A", counted.status)
+        assertEquals("A", counted.status.letter)
         assertEquals(0, counted.added)
     }
 
@@ -301,20 +302,20 @@ class DiffStatsPlanTest {
         assertTrue(DiffStatsPlan.diffHashes(listOf(item("a.kt")), stats, "42").isEmpty())
     }
 
-    private fun untracked(path: String, head: String = "") = HgFileItem(status = "?", path = path, headRev = head)
+    private fun untracked(path: String, head: String = "") = HgFileItem(status = HgFileStatus.UNTRACKED, path = path, headRev = head)
 
     @Test
     fun `only an untracked file of the working copy is hashed by content`() {
         assertTrue(DiffStatsPlan.isHashedByContent(untracked("a.kt")))
         assertFalse(DiffStatsPlan.isHashedByContent(untracked("a.kt", head = "9")))
-        for (status in listOf("M", "A", "R", "!", "→", DiffStatsPlan.UNCHANGED_STATUS)) {
-            assertFalse(status, DiffStatsPlan.isHashedByContent(HgFileItem(status = status, path = "a.kt")))
+        for (status in HgFileStatus.entries - HgFileStatus.UNTRACKED) {
+            assertFalse(status.letter, DiffStatsPlan.isHashedByContent(HgFileItem(status = status, path = "a.kt")))
         }
     }
 
     @Test
     fun `content hashed paths are the untracked ones`() {
-        val files = listOf(item("a.kt"), untracked("b.kt"), HgFileItem(status = "A", path = "c.kt"), untracked("d.kt"))
+        val files = listOf(item("a.kt"), untracked("b.kt"), HgFileItem(status = HgFileStatus.ADDED, path = "c.kt"), untracked("d.kt"))
 
         assertEquals(listOf("b.kt", "d.kt"), DiffStatsPlan.contentHashedPaths(files))
     }

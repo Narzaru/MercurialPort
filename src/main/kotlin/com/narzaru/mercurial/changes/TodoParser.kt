@@ -1,6 +1,7 @@
 package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgTodoItem
 
 object TodoParser {
 
@@ -11,13 +12,14 @@ object TodoParser {
 
     private const val NUL = '\u0000'
 
-    fun parse(source: HgFileItem, text: String): List<HgFileItem> {
-        val result = ArrayList<HgFileItem>()
+    fun parse(source: HgFileItem, text: String): List<HgTodoItem> {
+        val result = ArrayList<HgTodoItem>()
         if (text.contains(NUL)) return result
         if (!text.contains(TODO, ignoreCase = true)) return result
 
         val lines = text.split("\r\n", "\n", "\r")
         var inBlockComment = false
+        val file = HgFileItem(status = source.status, path = source.path, isUnchanged = source.isUnchanged)
 
         for (index in lines.indices) {
             val line = lines[index]
@@ -25,15 +27,7 @@ object TodoParser {
             inBlockComment = blockState
             if (!found) continue
 
-            result.add(
-                HgFileItem(
-                    status = source.status,
-                    path = source.path,
-                    isUnchanged = source.isUnchanged,
-                    todoText = formatTodoText(line),
-                    lineNumber = index + 1
-                )
-            )
+            result.add(HgTodoItem(file = file, lineNumber = index + 1, text = formatTodoText(line)))
         }
         return result
     }

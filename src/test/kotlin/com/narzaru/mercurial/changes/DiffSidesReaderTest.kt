@@ -4,6 +4,7 @@ import com.narzaru.mercurial.hg.HgContentCache
 import com.narzaru.mercurial.hg.HgResult
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -38,7 +39,7 @@ class DiffSidesReaderTest {
          d
     """.trimIndent()
 
-    private val changesetItem = HgFileItem(status = "M", path = "a.txt", headRev = "n2")
+    private val changesetItem = HgFileItem(status = HgFileStatus.MODIFIED, path = "a.txt", headRev = "n2")
 
     private val catOfHead = listOf("cat", "-r", "n2", "a.txt")
     private val catOfLastChangeBase = listOf("cat", "-r", "p1(n2)", "a.txt")
@@ -48,7 +49,7 @@ class DiffSidesReaderTest {
     @Test
     fun `a working copy file is compared with the base revision`() {
         val hg = FakeHg(mapOf(listOf("cat", "-r", ".", "a.txt") to ok("base")))
-        val sides = reader(hg).read(HgFileItem(status = "M", path = "a.txt"), ".")
+        val sides = reader(hg).read(HgFileItem(status = HgFileStatus.MODIFIED, path = "a.txt"), ".")
 
         assertEquals(listOf(listOf("cat", "-r", ".", "a.txt")), hg.calls)
         assertEquals("base", sides.base)
@@ -62,7 +63,7 @@ class DiffSidesReaderTest {
     @Test
     fun `the base revision of the file wins over the panel one`() {
         val hg = FakeHg(mapOf(listOf("cat", "-r", "7", "a.txt") to ok("base")))
-        val sides = reader(hg).read(HgFileItem(status = "M", path = "a.txt", baseRev = "7"), ".")
+        val sides = reader(hg).read(HgFileItem(status = HgFileStatus.MODIFIED, path = "a.txt", baseRev = "7"), ".")
 
         assertEquals(listOf(listOf("cat", "-r", "7", "a.txt")), hg.calls)
         assertEquals("7", sides.baseTitleRev)
@@ -71,7 +72,7 @@ class DiffSidesReaderTest {
     @Test
     fun `a new working copy file asks hg for nothing`() {
         val hg = FakeHg(emptyMap())
-        val sides = reader(hg).read(HgFileItem(status = "A", path = "a.txt"), ".")
+        val sides = reader(hg).read(HgFileItem(status = HgFileStatus.ADDED, path = "a.txt"), ".")
 
         assertTrue(hg.calls.isEmpty())
         assertNull(sides.base)
@@ -110,7 +111,7 @@ class DiffSidesReaderTest {
     @Test
     fun `a file added inside the range has only the head side`() {
         val hg = FakeHg(mapOf(catOfHead to ok(head)))
-        val sides = reader(hg).read(changesetItem.copy(status = "A"), "p1(n1)")
+        val sides = reader(hg).read(changesetItem.copy(status = HgFileStatus.ADDED), "p1(n1)")
 
         assertEquals(listOf(catOfHead), hg.calls)
         assertNull(sides.base)

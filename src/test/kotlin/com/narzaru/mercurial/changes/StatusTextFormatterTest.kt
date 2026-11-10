@@ -4,6 +4,7 @@ import com.narzaru.mercurial.hg.HgFailure
 import com.narzaru.mercurial.hg.HgResult
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -60,8 +61,8 @@ class StatusTextFormatterTest {
     @Test
     fun `the summary sums up the added and removed lines`() {
         val files = listOf(
-            HgFileItem(status = "M", path = "a.kt", added = 3, removed = 1),
-            HgFileItem(status = "M", path = "b.kt", added = 4, removed = 2)
+            HgFileItem(status = HgFileStatus.MODIFIED, path = "a.kt", added = 3, removed = 1),
+            HgFileItem(status = HgFileStatus.MODIFIED, path = "b.kt", added = 4, removed = 2)
         )
 
         val text = StatusTextFormatter.summary(files, reviewed = 1, statsPending = false)
@@ -71,7 +72,7 @@ class StatusTextFormatterTest {
 
     @Test
     fun `while the statistics are counted a mark is shown instead of numbers`() {
-        val files = listOf(HgFileItem(status = "M", path = "a.kt"))
+        val files = listOf(HgFileItem(status = HgFileStatus.MODIFIED, path = "a.kt"))
 
         val text = StatusTextFormatter.summary(files, reviewed = 0, statsPending = true)
 

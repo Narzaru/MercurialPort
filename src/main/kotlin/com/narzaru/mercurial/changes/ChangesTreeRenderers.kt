@@ -1,7 +1,8 @@
 package com.narzaru.mercurial.changes
 
-import com.narzaru.mercurial.hg.HgStatusParser
 import com.narzaru.mercurial.model.HgFileItem
+import com.narzaru.mercurial.model.HgFileStatus
+import com.narzaru.mercurial.model.HgTodoItem
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.ui.ColoredTreeCellRenderer
@@ -116,11 +117,15 @@ class ChangesNodeRenderer(
                 append(suffix, SimpleTextAttributes.GRAYED_ATTRIBUTES)
             }
             is FileNode -> {
-                val item = payload.item
+                val row = payload.row
+                val item = row.file
                 icon = FileTypeManager.getInstance().getFileTypeByFileName(item.name).icon
-                val status = "${item.status} "
+                val status = "${item.status.letter} "
                 append(status, SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, statusColor(item.status)))
-                val text = if (item.isTodoItem) item.displayPath else item.name
+                val text = when (row) {
+                    is HgFileItem -> row.name
+                    is HgTodoItem -> row.displayPath
+                }
                 append(
                     fit(text, tree, node, status),
                     when {
@@ -128,11 +133,13 @@ class ChangesNodeRenderer(
                         else -> SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES
                     }
                 )
-                if (item.copiedFrom.isNotEmpty() && !item.isTodoItem) {
-                    val from = item.copiedFrom.substringAfterLast('/')
-                    append("  ← $from", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                when (row) {
+                    is HgFileItem -> if (row.copiedFrom.isNotEmpty()) {
+                        val from = row.copiedFrom.substringAfterLast('/')
+                        append("  ← $from", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                    }
+                    is HgTodoItem -> append("  ${row.text}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 }
-                item.todoText?.let { append("  $it", SimpleTextAttributes.GRAYED_ATTRIBUTES) }
             }
         }
     }
@@ -159,12 +166,12 @@ class ChangesNodeRenderer(
     }
 }
 
-private fun statusColor(status: String?): Color = when (status) {
-    HgStatusParser.ADDED_STATUS -> JBColor(Color(60, 140, 80), Color(98, 181, 118))
-    HgStatusParser.MODIFIED_STATUS -> JBColor(Color(60, 100, 190), Color(110, 160, 240))
-    HgStatusParser.REMOVED_STATUS, HgStatusParser.MISSING_STATUS ->
+private fun statusColor(status: HgFileStatus): Color = when (status) {
+    HgFileStatus.ADDED -> JBColor(Color(60, 140, 80), Color(98, 181, 118))
+    HgFileStatus.MODIFIED -> JBColor(Color(60, 100, 190), Color(110, 160, 240))
+    HgFileStatus.REMOVED, HgFileStatus.MISSING ->
         JBColor(Color(180, 70, 70), Color(220, 110, 110))
-    HgStatusParser.UNTRACKED_STATUS -> JBColor(Color(150, 70, 190), Color(190, 130, 220))
-    HgStatusParser.RENAMED_STATUS -> JBColor(Color(160, 110, 30), Color(210, 165, 80))
-    else -> JBColor.GRAY
+    HgFileStatus.UNTRACKED -> JBColor(Color(150, 70, 190), Color(190, 130, 220))
+    HgFileStatus.RENAMED -> JBColor(Color(160, 110, 30), Color(210, 165, 80))
+    HgFileStatus.CLEAN, HgFileStatus.IGNORED, HgFileStatus.UNCHANGED -> JBColor.GRAY
 }
