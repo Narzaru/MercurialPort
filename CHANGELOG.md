@@ -3,6 +3,8 @@
 # Mercurial Port Changelog
 
 ## [Unreleased]
+
+## [1.2.0] - 2026-11-11
 ### Added
 - **`Changesets` can show a review the way Upsource does.** Choose `Upsource review` under
   `Changesets are built by:` in the settings: the file list, the `+N −M` counts, the review marks and
