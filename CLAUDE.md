@@ -47,6 +47,7 @@
 | `changes` | Тул-окно **Hg Changes** — дерево изменений, ревью-отметки, TODO-режим |
 | `diff` | Дифф-вкладки плагина (`HgDiffTabManager`) |
 | `history` | Тул-окно **Hg File History** — `hg log -f` по файлу |
+| `review` | Движок «как в Upsource»: файлы, стороны и показываемые ханки для набора ревизий (`ReviewChanges`) |
 | `export` | Действия «Hg Export» в меню Tools |
 | `status` | Статусы файлов вне тул-окна — буква состояния в заголовке вкладки редактора |
 | `model` | Модели данных: строка списка `HgChangeRow` — файл `HgFileItem` или TODO `HgTodoItem`, статус `HgFileStatus`, `HgDiffStat`, режимы |

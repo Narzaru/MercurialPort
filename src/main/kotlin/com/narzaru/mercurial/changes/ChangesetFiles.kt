@@ -5,7 +5,7 @@ import com.narzaru.mercurial.model.HgFileItem
 
 object ChangesetFiles {
 
-    private const val NODE_MARKER = "@"
+    const val NODE_MARKER = "@"
 
     private const val COPY_TARGET_MARKER = "* "
 
@@ -17,12 +17,13 @@ object ChangesetFiles {
 
     const val MIN_NODES = 2
 
-    const val TEMPLATE =
-        "$NODE_MARKER{node|short}\\n" +
-            "{file_mods % \"M {file}\\n\"}" +
+    const val FILES_TEMPLATE =
+        "{file_mods % \"M {file}\\n\"}" +
             "{file_adds % \"A {file}\\n\"}" +
             "{file_dels % \"R {file}\\n\"}" +
             "{file_copies % \"$COPY_TARGET_MARKER{name}\\n$COPY_SOURCE_MARKER{source}\\n\"}"
+
+    const val TEMPLATE = "$NODE_MARKER{node|short}\\n$FILES_TEMPLATE"
 
     fun singleRevisionRanges(ranges: Map<String, FileRange>, merges: Set<String>): Map<String, DiffRange> {
         val result = LinkedHashMap<String, DiffRange>()
