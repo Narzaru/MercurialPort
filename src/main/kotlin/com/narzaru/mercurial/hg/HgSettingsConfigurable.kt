@@ -11,6 +11,7 @@ import com.intellij.ui.dsl.builder.RightGap
 import com.intellij.ui.dsl.builder.columns
 import com.intellij.ui.dsl.builder.panel
 import com.narzaru.mercurial.changes.HgChangesService
+import com.narzaru.mercurial.model.ChangesetsEngine
 import com.narzaru.mercurial.model.ChangesetsFragments
 import com.narzaru.mercurial.status.HgFileStatusService
 import javax.swing.JCheckBox
@@ -43,12 +44,19 @@ class HgSettingsConfigurable : Configurable {
 
     private val branchLimitField = JBTextField()
 
-    private val fragmentsCombo =ComboBox(ChangesetsFragments.entries.toTypedArray()).apply {
+    private val fragmentsCombo = ComboBox(ChangesetsFragments.entries.toTypedArray()).apply {
         addActionListener { toolTipText = (selectedItem as? ChangesetsFragments)?.hint }
     }
 
     private val widenCheck = JCheckBox("Show a touched fragment whole").apply {
-        addActionListener { fragmentsCombo.isEnabled = isSelected }
+        addActionListener { updateChangesetsControls() }
+    }
+
+    private val engineCombo = ComboBox(ChangesetsEngine.entries.toTypedArray()).apply {
+        addActionListener {
+            toolTipText = (selectedItem as? ChangesetsEngine)?.hint
+            updateChangesetsControls()
+        }
     }
 
     override fun getDisplayName() = "Mercurial Port"
@@ -107,11 +115,19 @@ class HgSettingsConfigurable : Configurable {
         group("Changesets Diff") {
             row {
                 text(
-                    "In the <b>Changesets</b> mode the left side of a diff is the head with the " +
-                        "branch's own patches rolled back out of it, so that what a merge brought " +
-                        "into the file stays out of the diff. <b>Upsource review</b> below replaces " +
-                        "this with Upsource's own rules, the file list and the ± counts included."
+                    "How the <b>Changesets</b> mode picks the files it lists, counts their ± lines " +
+                        "and builds the left side of a diff."
                 )
+            }
+            row("Changesets are built by:") {
+                cell(engineCombo)
+                    .comment(
+                        "<b>Branch patches</b>: the left side is the head with the branch's own patches " +
+                            "rolled back out of it, so that what a merge brought into the file stays " +
+                            "out of the diff; the two settings below tune it. <b>Upsource review</b>: " +
+                            "the file list, the ± counts and the diff are what Upsource shows for a " +
+                            "review of the same changesets, and the settings below do not apply."
+                    )
             }
             row {
                 cell(widenCheck)
@@ -137,7 +153,21 @@ class HgSettingsConfigurable : Configurable {
     private fun selectedFragments(): ChangesetsFragments =
         fragmentsCombo.selectedItem as? ChangesetsFragments ?: HgSettings.changesetsFragments
 
+    private fun selectedEngine(): ChangesetsEngine =
+        engineCombo.selectedItem as? ChangesetsEngine ?: HgSettings.changesetsEngine
+
     private fun selectedBranchLimit(): Int? = HgSettings.branchLimitChoice(branchLimitField.text)
+
+    private fun changesetsModified(): Boolean =
+        selectedEngine() != HgSettings.changesetsEngine ||
+            widenCheck.isSelected != HgSettings.widenToFragments ||
+            selectedFragments() != HgSettings.changesetsFragments
+
+    private fun updateChangesetsControls() {
+        val controls = ChangesetsDiffControls.of(selectedEngine(), widenCheck.isSelected)
+        widenCheck.isEnabled = controls.widenEnabled
+        fragmentsCombo.isEnabled = controls.fragmentsEnabled
+    }
 
     override fun isModified(): Boolean =
         selectedEncoding() != HgSettings.fallbackEncoding ||
@@ -146,8 +176,7 @@ class HgSettingsConfigurable : Configurable {
             ignoreEolCheck.isSelected != HgSettings.ignoreEolChanges ||
             commandServerCheck.isSelected != HgSettings.useCommandServer ||
             selectedServerCount() != HgSettings.commandServerCount ||
-            widenCheck.isSelected != HgSettings.widenToFragments ||
-            selectedFragments() != HgSettings.changesetsFragments
+            changesetsModified()
 
     override fun apply() {
         val encoding = selectedEncoding()
@@ -160,8 +189,7 @@ class HgSettingsConfigurable : Configurable {
 
         val statusChanged = statusLetterCheck.isSelected != HgSettings.statusInTabs
         val countingChanged = ignoreEolCheck.isSelected != HgSettings.ignoreEolChanges
-        val changesetsChanged = widenCheck.isSelected != HgSettings.widenToFragments ||
-            selectedFragments() != HgSettings.changesetsFragments
+        val changesetsChanged = changesetsModified()
         val branchLimitChanged = branchLimit != HgSettings.largestBranch
 
         if (commandServerCheck.isSelected != HgSettings.useCommandServer) {
@@ -177,6 +205,7 @@ class HgSettingsConfigurable : Configurable {
         HgSettings.fallbackEncoding = encoding
         HgSettings.statusInTabs = statusLetterCheck.isSelected
         HgSettings.ignoreEolChanges = ignoreEolCheck.isSelected
+        HgSettings.changesetsEngine = selectedEngine()
         HgSettings.widenToFragments = widenCheck.isSelected
         HgSettings.changesetsFragments = selectedFragments()
         HgSettings.largestBranch = branchLimit
@@ -204,9 +233,11 @@ class HgSettingsConfigurable : Configurable {
         serverCountSpinner.value = HgSettings.commandServerCount
         serverCountSpinner.isEnabled = HgSettings.useCommandServer
         branchLimitField.text = HgSettings.largestBranch.toString()
+        engineCombo.selectedItem = HgSettings.changesetsEngine
+        engineCombo.toolTipText = HgSettings.changesetsEngine.hint
         widenCheck.isSelected = HgSettings.widenToFragments
         fragmentsCombo.selectedItem = HgSettings.changesetsFragments
-        fragmentsCombo.isEnabled = widenCheck.isSelected
         fragmentsCombo.toolTipText = HgSettings.changesetsFragments.hint
+        updateChangesetsControls()
     }
 }

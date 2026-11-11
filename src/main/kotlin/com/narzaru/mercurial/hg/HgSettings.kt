@@ -3,6 +3,7 @@ package com.narzaru.mercurial.hg
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.application.ApplicationManager
 import com.narzaru.mercurial.changes.BranchSizeGuard
+import com.narzaru.mercurial.model.ChangesetsEngine
 import com.narzaru.mercurial.model.ChangesetsFragments
 import java.nio.charset.Charset
 import kotlin.properties.ReadWriteProperty
@@ -13,6 +14,7 @@ object HgSettings {
     private const val ENCODING_KEY = "mercurial.fallbackEncoding"
     private const val WIDEN_KEY = "mercurial.changesetsWiden"
     private const val FRAGMENTS_KEY = "mercurial.changesetsFragments"
+    private const val ENGINE_KEY = "mercurial.changesetsEngine"
     private const val IGNORE_EOL_KEY = "mercurial.ignoreEolChanges"
     private const val STATUS_IN_TABS_KEY = "mercurial.statusInTabs"
     private const val COMMAND_SERVER_KEY = "mercurial.commandServer"
@@ -41,10 +43,12 @@ object HgSettings {
         set(value) = PropertiesComponent.getInstance()
             .setValue(FRAGMENTS_KEY, value.name, ChangesetsFragments.DEFAULT.name)
 
-    val usesReviewEngine: Boolean get() = reviewEngineChoice(widenToFragments, changesetsFragments)
+    var changesetsEngine: ChangesetsEngine
+        get() = ChangesetsEngine.fromStored(properties()?.getValue(ENGINE_KEY))
+        set(value) = PropertiesComponent.getInstance()
+            .setValue(ENGINE_KEY, value.name, ChangesetsEngine.DEFAULT.name)
 
-    fun reviewEngineChoice(widenToFragments: Boolean, fragments: ChangesetsFragments): Boolean =
-        widenToFragments && fragments == ChangesetsFragments.UPSOURCE
+    val usesReviewEngine: Boolean get() = changesetsEngine.isUpsourceReview
 
     var ignoreEolChanges: Boolean by flag(IGNORE_EOL_KEY, true)
 

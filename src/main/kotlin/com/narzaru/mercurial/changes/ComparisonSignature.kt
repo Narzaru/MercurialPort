@@ -1,5 +1,6 @@
 package com.narzaru.mercurial.changes
 
+import com.narzaru.mercurial.model.ChangesetsEngine
 import com.narzaru.mercurial.model.ChangesetsFragments
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
@@ -22,4 +23,7 @@ object ComparisonSignature {
         fragments: ChangesetsFragments,
         policyName: String
     ): String = if (widenToFragments) "$fragments:$policyName" else LINES_STAMP
+
+    fun changesetsStamp(engine: ChangesetsEngine, ownRulesStamp: () -> String): String =
+        if (engine.isUpsourceReview) engine.name else ownRulesStamp()
 }

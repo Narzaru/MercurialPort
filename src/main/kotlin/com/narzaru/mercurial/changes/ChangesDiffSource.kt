@@ -158,9 +158,11 @@ class ChangesDiffSource(
             return state.changedItemAt(key)
         }
 
-        fun changesetsStamp(): String = ComparisonSignature.fragmentsStamp(
-            HgSettings.widenToFragments, HgSettings.changesetsFragments, fragmentPolicy().name
-        )
+        fun changesetsStamp(): String = ComparisonSignature.changesetsStamp(HgSettings.changesetsEngine) {
+            ComparisonSignature.fragmentsStamp(
+                HgSettings.widenToFragments, HgSettings.changesetsFragments, fragmentPolicy().name
+            )
+        }
 
         private fun fragmentPolicy(): ComparisonPolicy = when (HgSettings.changesetsFragments) {
             ChangesetsFragments.PLATFORM_TRIMMED -> ComparisonPolicy.TRIM_WHITESPACES

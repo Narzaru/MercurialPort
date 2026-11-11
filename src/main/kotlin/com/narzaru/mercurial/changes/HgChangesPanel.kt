@@ -11,7 +11,7 @@ import com.narzaru.mercurial.hg.HgResult
 import com.narzaru.mercurial.hg.HgSettings
 import com.narzaru.mercurial.hg.HgSettingsConfigurable
 import com.narzaru.mercurial.history.HgFileHistoryService
-import com.narzaru.mercurial.model.ChangesetsFragments
+import com.narzaru.mercurial.model.ChangesetsEngine
 import com.narzaru.mercurial.model.HgChangeRow
 import com.narzaru.mercurial.model.HgDiffStat
 import com.narzaru.mercurial.model.HgDisplayMode
@@ -920,7 +920,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         comparison = ComparisonState(repoRoot, result.targetRev, mode, result.revsByFile, review = result.review)
         val repoState = RepoState.parse(result.currentInfo)
         fileChanges.loaded(repoState)
-        val engine = if (result.review != null) "|${ChangesetsFragments.UPSOURCE.name}" else ""
+        val engine = if (result.review != null) "|${ChangesetsEngine.UPSOURCE.name}" else ""
         review.startLoad(
             repoState.takeIf { it.isKnown }?.branch.orEmpty(),
             "${mode.name}|${result.targetRev}$engine"

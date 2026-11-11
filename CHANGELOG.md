@@ -3,6 +3,11 @@
 # Mercurial Port Changelog
 
 ## [Unreleased]
+### Added
+- **`Changesets` can show a review the way Upsource does.** Choose `Upsource review` under
+  `Changesets are built by:` in the settings: the file list, the `+N −M` counts, the review marks and
+  the diff then follow Upsource's rules, where a change is hidden only when it came from a merge that
+  changed the file on both sides.
 
 ## [1.1.0] - 2026-11-10
 ### Added

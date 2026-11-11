@@ -1,5 +1,6 @@
 package com.narzaru.mercurial.hg
 
+import com.narzaru.mercurial.model.ChangesetsEngine
 import com.narzaru.mercurial.model.ChangesetsFragments
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -50,7 +51,6 @@ class HgSettingsTest {
         for (choice in ChangesetsFragments.entries) {
             assertEquals(choice, ChangesetsFragments.fromStored(choice.name))
         }
-        assertEquals("UPSOURCE", ChangesetsFragments.UPSOURCE.name)
     }
 
     @Test
@@ -61,13 +61,39 @@ class HgSettingsTest {
     }
 
     @Test
-    fun `the review engine runs only when chosen with whole fragments on`() {
-        assertTrue(HgSettings.reviewEngineChoice(true, ChangesetsFragments.UPSOURCE))
-        assertFalse(HgSettings.reviewEngineChoice(false, ChangesetsFragments.UPSOURCE))
-        for (choice in ChangesetsFragments.entries - ChangesetsFragments.UPSOURCE) {
-            assertFalse(HgSettings.reviewEngineChoice(true, choice))
+    fun `a fragment choice stored as the review engine falls back to the default`() {
+        assertEquals(ChangesetsFragments.DEFAULT, ChangesetsFragments.fromStored("UPSOURCE"))
+    }
+
+    @Test
+    fun `every engine choice is read back under the name it is stored by`() {
+        for (choice in ChangesetsEngine.entries) {
+            assertEquals(choice, ChangesetsEngine.fromStored(choice.name))
         }
+        assertEquals(listOf("PLUGIN", "UPSOURCE"), ChangesetsEngine.entries.map { it.name })
+    }
+
+    @Test
+    fun `the plugin's own rules build changesets unless another engine is stored`() {
+        assertEquals(ChangesetsEngine.PLUGIN, ChangesetsEngine.DEFAULT)
+        assertEquals(ChangesetsEngine.DEFAULT, HgSettings.changesetsEngine)
+        assertEquals(ChangesetsEngine.DEFAULT, ChangesetsEngine.fromStored(null))
+        assertEquals(ChangesetsEngine.DEFAULT, ChangesetsEngine.fromStored("PLATFORM_TRIMMED"))
+    }
+
+    @Test
+    fun `the review engine runs only when Upsource review is chosen`() {
+        assertTrue(ChangesetsEngine.UPSOURCE.isUpsourceReview)
+        assertFalse(ChangesetsEngine.PLUGIN.isUpsourceReview)
         assertFalse(HgSettings.usesReviewEngine)
+    }
+
+    @Test
+    fun `the own rules' switches are open only while the own rules are chosen`() {
+        assertEquals(ChangesetsDiffControls(true, true), ChangesetsDiffControls.of(ChangesetsEngine.PLUGIN, true))
+        assertEquals(ChangesetsDiffControls(true, false), ChangesetsDiffControls.of(ChangesetsEngine.PLUGIN, false))
+        assertEquals(ChangesetsDiffControls(false, false), ChangesetsDiffControls.of(ChangesetsEngine.UPSOURCE, true))
+        assertEquals(ChangesetsDiffControls(false, false), ChangesetsDiffControls.of(ChangesetsEngine.UPSOURCE, false))
     }
 
     @Test

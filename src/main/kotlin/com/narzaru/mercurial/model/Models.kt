@@ -24,13 +24,6 @@ enum class ChangesetsFragments(val title: String, val hint: String) {
         "hg diff hunks",
         "The engine that counts ± as well. Disagrees with the IDE about which of two identical " +
             "braces counts as changed."
-    ),
-
-    UPSOURCE(
-        "Upsource review (as Upsource shows it)",
-        "The file list, the ± counts and the diff follow what Upsource shows for a review of the " +
-            "selected changesets and the branch's merges between them: a change is hidden only " +
-            "when it came from a merge that changed the file on both sides."
     );
 
     override fun toString(): String = title
@@ -40,6 +33,33 @@ enum class ChangesetsFragments(val title: String, val hint: String) {
         val DEFAULT = PLATFORM_TRIMMED
 
         fun fromStored(name: String?): ChangesetsFragments = entries.firstOrNull { it.name == name } ?: DEFAULT
+    }
+}
+
+enum class ChangesetsEngine(val title: String, val hint: String) {
+
+    PLUGIN(
+        "Branch patches (plugin)",
+        "The plugin's own rules: the left side is the head with the branch's own patches rolled " +
+            "back out of it, tuned by the switches below."
+    ),
+
+    UPSOURCE(
+        "Upsource review (as Upsource shows it)",
+        "The file list, the ± counts and the diff follow what Upsource shows for a review of the " +
+            "selected changesets and the branch's merges between them: a change is hidden only " +
+            "when it came from a merge that changed the file on both sides."
+    );
+
+    val isUpsourceReview: Boolean get() = this == UPSOURCE
+
+    override fun toString(): String = title
+
+    companion object {
+
+        val DEFAULT = PLUGIN
+
+        fun fromStored(name: String?): ChangesetsEngine = entries.firstOrNull { it.name == name } ?: DEFAULT
     }
 }
 

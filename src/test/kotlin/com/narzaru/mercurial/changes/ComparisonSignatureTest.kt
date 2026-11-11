@@ -1,11 +1,13 @@
 package com.narzaru.mercurial.changes
 
+import com.narzaru.mercurial.model.ChangesetsEngine
 import com.narzaru.mercurial.model.ChangesetsFragments
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
 import com.narzaru.mercurial.model.HgFileStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ComparisonSignatureTest {
@@ -76,6 +78,27 @@ class ComparisonSignatureTest {
             ComparisonSignature.fragmentsStamp(true, ChangesetsFragments.PLATFORM, "DEFAULT"),
             ComparisonSignature.fragmentsStamp(true, ChangesetsFragments.PLATFORM, "TRIM_WHITESPACES")
         )
+    }
+
+    @Test
+    fun `the plugin's own rules are stamped by their fragment settings`() {
+        assertEquals(stamp, ComparisonSignature.changesetsStamp(ChangesetsEngine.PLUGIN) { stamp })
+        assertEquals(
+            ComparisonSignature.LINES_STAMP,
+            ComparisonSignature.changesetsStamp(ChangesetsEngine.PLUGIN) { ComparisonSignature.LINES_STAMP }
+        )
+    }
+
+    @Test
+    fun `Upsource review has a stamp of its own whatever the fragment settings`() {
+        val ownRulesStamps = listOf(ComparisonSignature.LINES_STAMP) + ChangesetsFragments.entries
+            .map { ComparisonSignature.fragmentsStamp(true, it, "DEFAULT") }
+        val reviewStamps = ownRulesStamps
+            .map { own -> ComparisonSignature.changesetsStamp(ChangesetsEngine.UPSOURCE) { own } }
+            .toSet()
+
+        assertEquals(1, reviewStamps.size)
+        assertTrue(reviewStamps.none { it in ownRulesStamps })
     }
 
     @Test
