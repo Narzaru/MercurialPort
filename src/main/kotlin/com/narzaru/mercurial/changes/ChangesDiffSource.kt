@@ -90,7 +90,7 @@ class ChangesDiffSource(
             lineComparator,
             LOG::warn
         )
-        return DiffSidesReader(builder, skippedHunks)
+        return DiffSidesReader(builder, skippedHunks, state.review?.let { it::leftSide })
     }
 
     private fun buildRequest(item: HgFileItem, localFile: File, sides: DiffSides): SimpleDiffRequest? {

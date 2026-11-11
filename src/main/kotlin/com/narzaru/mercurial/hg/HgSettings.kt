@@ -37,13 +37,14 @@ object HgSettings {
     var widenToFragments: Boolean by flag(WIDEN_KEY, true)
 
     var changesetsFragments: ChangesetsFragments
-        get() {
-            val name = properties()?.getValue(FRAGMENTS_KEY)
-            return ChangesetsFragments.entries.firstOrNull { it.name == name }
-                ?: ChangesetsFragments.PLATFORM_TRIMMED
-        }
+        get() = ChangesetsFragments.fromStored(properties()?.getValue(FRAGMENTS_KEY))
         set(value) = PropertiesComponent.getInstance()
-            .setValue(FRAGMENTS_KEY, value.name, ChangesetsFragments.PLATFORM_TRIMMED.name)
+            .setValue(FRAGMENTS_KEY, value.name, ChangesetsFragments.DEFAULT.name)
+
+    val usesReviewEngine: Boolean get() = reviewEngineChoice(widenToFragments, changesetsFragments)
+
+    fun reviewEngineChoice(widenToFragments: Boolean, fragments: ChangesetsFragments): Boolean =
+        widenToFragments && fragments == ChangesetsFragments.UPSOURCE
 
     var ignoreEolChanges: Boolean by flag(IGNORE_EOL_KEY, true)
 

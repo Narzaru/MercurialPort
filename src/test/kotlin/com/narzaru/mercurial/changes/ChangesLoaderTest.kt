@@ -2,6 +2,8 @@ package com.narzaru.mercurial.changes
 
 import com.narzaru.mercurial.hg.HgResult
 import com.narzaru.mercurial.model.HgDisplayMode
+import com.narzaru.mercurial.review.ReviewChanges
+import com.narzaru.mercurial.review.ReviewLog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -609,6 +611,73 @@ class ChangesLoaderTest {
         assertNull(result.revisionsMoreThan)
     }
 
+    @Test
+    fun `the review engine lists the files of the selected changesets and the merges between them`() {
+        val reviewRevset = SelectionRevsets.review(BranchRevisions.parse(revisionsLog), RevisionSelection.DEFAULT)!!
+        val reviewLog = "@n1\n^11 n0 000000000000\n^feature\n^\nM src/A.kt\n" +
+            "@n2\n^12 n1 000000000000\n^feature\n^\nA src/B.kt\n"
+        val hg = FakeHg(
+            mapOf(
+                currentBranch to ok("feature"),
+                branchRevisions to ok(revisionsLog),
+                currentRevision to ok("feature|abc123|Work in progress"),
+                baseRevision(branchPoint) to ok("default|def456|Parent work"),
+                ReviewLog.args(reviewRevset) to ok(reviewLog),
+                listOf("cat", "-r", "n0", "path:src/A.kt") to ok("a\n"),
+                listOf("cat", "-r", "n1", "path:src/A.kt") to ok("b\n"),
+                listOf("cat", "-r", "n2", "path:src/B.kt") to ok("new\n")
+            )
+        )
+        val result = load(hg, HgDisplayMode.CHANGESETS, engine = ReviewChanges(hg))
+
+        assertNull(result.error)
+        assertEquals(branchPoint, result.targetRev)
+        assertEquals(
+            listOf("M src/A.kt n0..n1", "A src/B.kt n1..n2"),
+            result.files.map { "${it.status.letter} ${it.path} ${it.baseRev}..${it.headRev}" }
+        )
+        assertEquals(result.files, result.review!!.items)
+        assertEquals(emptyList<DiffRange>(), result.statsRanges)
+        assertEquals(emptyMap<String, List<String>>(), result.revsByFile)
+        assertTrue(hg.calls.none { it.first() == "status" || it.first() == "diff" })
+    }
+
+    @Test
+    fun `a failed review log stops the load with the hg message`() {
+        val reviewRevset = SelectionRevsets.review(BranchRevisions.parse(revisionsLog), RevisionSelection.DEFAULT)!!
+        val hg = FakeHg(
+            mapOf(
+                currentBranch to ok("feature"),
+                branchRevisions to ok(revisionsLog),
+                currentRevision to ok("feature|abc123|Work in progress"),
+                baseRevision(branchPoint) to ok("default|def456|Parent work"),
+                ReviewLog.args(reviewRevset) to failed("abort: unknown revision")
+            )
+        )
+        val result = load(hg, HgDisplayMode.CHANGESETS, engine = ReviewChanges(hg))
+
+        assertEquals("HG Error: abort: unknown revision", result.error)
+        assertNull(result.review)
+        assertTrue(result.files.isEmpty())
+    }
+
+    @Test
+    fun `the review engine keeps the empty selection handling`() {
+        val hg = FakeHg(
+            mapOf(
+                currentBranch to ok("feature"),
+                branchRevisions to ok(revisionsLog),
+                currentRevision to ok("feature|abc123|Work in progress")
+            )
+        )
+        val result = load(
+            hg, HgDisplayMode.CHANGESETS, overrides = { listOf("n1=0", "n2=0") }, engine = ReviewChanges(hg)
+        )
+
+        assertEquals("No revisions selected — pick at least one below.", result.error)
+        assertTrue(hg.calls.none { it.first() == "cat" })
+    }
+
     private val changesetLog =
         listOf("log", "-r", SelectionRevsets.OWN_COMMITS,"--template", BranchRevisions.FILES_TEMPLATE)
 
@@ -621,8 +690,9 @@ class ChangesLoaderTest {
         customBranch: String = "",
         untracked: Boolean = false,
         overrides: (String) -> List<String> = { emptyList() },
-        limit: Int = 0
-    ): ChangesResult = ChangesLoader(hg, ParallelJobs(SameThreadLauncher), BranchSizeGuard(limit), overrides, {})
+        limit: Int = 0,
+        engine: ReviewChanges? = null
+    ): ChangesResult = ChangesLoader(hg, ParallelJobs(SameThreadLauncher), BranchSizeGuard(limit), overrides, {}, engine)
         .load(mode, customBranch, untracked)
 
     private fun ok(stdout: String) = HgResult(0, stdout, "")

@@ -122,6 +122,62 @@ class SelectionRevsetsTest {
     }
 
     @Test
+    fun `a review adds the branch merges between the first and the last selected revision`() {
+        val first = commits.first().node
+        val last = commits.last().node
+
+        assertEquals(
+            "($ownCommits) + (($first::$last) and merge() and ($own))",
+            SelectionRevsets.review(long, RevisionSelection.DEFAULT)
+        )
+    }
+
+    @Test
+    fun `the merge window of a review follows a narrowed selection`() {
+        val kept = listOf(commits[10], commits[20])
+        val selection = RevisionPicking.apply(long, RevisionSelection.DEFAULT, commits - kept.toSet(), false)
+
+        assertEquals(
+            "(${kept[0].node}+${kept[1].node}) + ((${kept[0].node}::${kept[1].node}) and merge() and ($own))",
+            SelectionRevsets.review(long, selection)
+        )
+    }
+
+    @Test
+    fun `the merge window is ordered by revision number, not by list order`() {
+        val shuffled = listOf(revision(9), revision(2), revision(5))
+
+        assertEquals(
+            "($ownCommits) + ((${node(2)}::${node(9)}) and merge() and ($own))",
+            SelectionRevsets.review(shuffled, RevisionSelection.DEFAULT)
+        )
+    }
+
+    @Test
+    fun `a review of one revision has no merges to add`() {
+        val short = listOf(revision(1), revision(2), revision(3))
+        val selection = RevisionPicking.apply(short, RevisionSelection.DEFAULT, short.take(2), false)
+
+        assertEquals(node(3), SelectionRevsets.review(short, selection))
+    }
+
+    @Test
+    fun `a selected merge stays in the review whatever the window`() {
+        val selection = RevisionSelection.DEFAULT.with(merges[2], true)
+
+        assertEquals(
+            "(($ownCommits) + ${merges[2].node}) + ((${commits.first().node}::${commits.last().node}) " +
+                "and merge() and ($own))",
+            SelectionRevsets.review(long, selection)
+        )
+    }
+
+    @Test
+    fun `nothing selected is no review`() {
+        assertEquals(null, SelectionRevsets.review(emptyList(), RevisionSelection.DEFAULT))
+    }
+
+    @Test
     fun `a subset covering the whole universe is the universe itself`() {
         val members = commits.map { it.node }
 

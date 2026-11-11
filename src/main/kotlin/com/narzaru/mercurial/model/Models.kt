@@ -24,9 +24,23 @@ enum class ChangesetsFragments(val title: String, val hint: String) {
         "hg diff hunks",
         "The engine that counts ± as well. Disagrees with the IDE about which of two identical " +
             "braces counts as changed."
+    ),
+
+    UPSOURCE(
+        "Upsource review (as Upsource shows it)",
+        "The file list, the ± counts and the diff follow what Upsource shows for a review of the " +
+            "selected changesets and the branch's merges between them: a change is hidden only " +
+            "when it came from a merge that changed the file on both sides."
     );
 
     override fun toString(): String = title
+
+    companion object {
+
+        val DEFAULT = PLATFORM_TRIMMED
+
+        fun fromStored(name: String?): ChangesetsFragments = entries.firstOrNull { it.name == name } ?: DEFAULT
+    }
 }
 
 enum class HgDisplayMode(

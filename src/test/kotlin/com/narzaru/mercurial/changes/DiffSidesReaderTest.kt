@@ -147,10 +147,47 @@ class DiffSidesReaderTest {
         assertTrue(skipped.isEmpty())
     }
 
+    @Test
+    fun `a review engine left side replaces the rolled back base`() {
+        val hg = FakeHg(mapOf(catOfHead to ok(head)))
+        val asked = ArrayList<HgFileItem>()
+        val sides = reader(hg, reviewLeftSide = { asked.add(it); "a\nb\nC2\nd" }).read(changesetItem, "p1(n1)")
+
+        assertEquals(listOf(changesetItem), asked)
+        assertEquals(listOf(catOfHead), hg.calls)
+        assertEquals("a\nb\nC2\nd", sides.base)
+        assertEquals(head, sides.head)
+        assertFalse(sides.onlyLast)
+        assertEquals(0, sides.skippedHunks)
+    }
+
+    @Test
+    fun `a file the review engine does not diff is compared with its base revision`() {
+        val catOfBase = listOf("cat", "-r", "b0", "a.txt")
+        val hg = FakeHg(mapOf(catOfHead to ok(head), catOfBase to ok("base")))
+        val item = changesetItem.copy(baseRev = "b0")
+        val sides = reader(hg, reviewLeftSide = { null }).read(item, "p1(n1)")
+
+        assertEquals(listOf(catOfHead, catOfBase), hg.calls)
+        assertEquals("base", sides.base)
+        assertEquals("b0", sides.baseTitleRev)
+    }
+
+    @Test
+    fun `a file added in the review is not asked for a left side`() {
+        val hg = FakeHg(mapOf(catOfHead to ok(head)))
+        val sides = reader(hg, reviewLeftSide = { error("not expected") })
+            .read(changesetItem.copy(status = HgFileStatus.ADDED), "p1(n1)")
+
+        assertNull(sides.base)
+        assertEquals(head, sides.head)
+    }
+
     private fun reader(
         hg: FakeHg,
         cache: HgContentCache = HgContentCache(),
-        skipped: MutableMap<String, Int> = HashMap()
+        skipped: MutableMap<String, Int> = HashMap(),
+        reviewLeftSide: ((HgFileItem) -> String?)? = null
     ) = DiffSidesReader(
         BranchBaseBuilder(
             hg,
@@ -164,7 +201,8 @@ class DiffSidesReaderTest {
             NoLines,
             {}
         ),
-        skipped
+        skipped,
+        reviewLeftSide
     )
 
     private fun ok(stdout: String) = HgResult(0, stdout, "")

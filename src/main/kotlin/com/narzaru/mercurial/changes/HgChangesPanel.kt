@@ -11,6 +11,7 @@ import com.narzaru.mercurial.hg.HgResult
 import com.narzaru.mercurial.hg.HgSettings
 import com.narzaru.mercurial.hg.HgSettingsConfigurable
 import com.narzaru.mercurial.history.HgFileHistoryService
+import com.narzaru.mercurial.model.ChangesetsFragments
 import com.narzaru.mercurial.model.HgChangeRow
 import com.narzaru.mercurial.model.HgDiffStat
 import com.narzaru.mercurial.model.HgDisplayMode
@@ -41,6 +42,10 @@ import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.options.ShowSettingsUtil
+import com.intellij.openapi.progress.EmptyProgressIndicator
+import com.intellij.openapi.progress.ProcessCanceledException
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.diagnostic.Logger
@@ -156,6 +161,8 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private var todoScanId = 0
 
     private val statsScheduler = StatsScheduler()
+
+    private var reviewStatsIndicator: ProgressIndicator? = null
 
     private val filterField = JBTextField()
     private val excludeField = JBTextField()
@@ -856,6 +863,7 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         showStatus("Loading…")
         val mode = displayMode
         val untracked = showUntracked
+        val usesReviewEngine = mode.isChangesets && HgSettings.usesReviewEngine
 
         val trace = newTrace(mode)
 
@@ -866,12 +874,14 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                     onEdt { if (requestId == refreshId) showStatus("No repo found") }
                     return@executeOnPooledThread
                 }
+                val runner = HgCommandRunner(repoRoot, trace)
                 val result = ChangesLoader(
-                    HgCommands.of(HgCommandRunner(repoRoot, trace)),
+                    HgCommands.of(runner),
                     jobs,
                     BranchSizeGuard(HgSettings.largestBranch),
                     settings::revisionOverrides,
-                    LOG::warn
+                    LOG::warn,
+                    if (usesReviewEngine) ReviewEngineSetup.create(runner) else null
                 ).load(mode, customBranch, untracked, trace)
 
                 onEdt {
@@ -898,19 +908,22 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         openRequestedDiff()
         if (result.error == null && result.files.isNotEmpty()) {
             val load = statsScheduler.startLoad(result.statsRanges, result.statsPaths)
-            loadDiffStats(repoRoot, result.targetRev, load, trace)
+            val engineReview = result.review
+            if (engineReview != null) loadReviewStats(engineReview, load, trace)
+            else loadDiffStats(repoRoot, result.targetRev, load, trace)
         } else {
             report(trace)
         }
     }
 
     private fun startComparison(repoRoot: File, mode: HgDisplayMode, result: ChangesResult) {
-        comparison = ComparisonState(repoRoot, result.targetRev, mode, result.revsByFile)
+        comparison = ComparisonState(repoRoot, result.targetRev, mode, result.revsByFile, review = result.review)
         val repoState = RepoState.parse(result.currentInfo)
         fileChanges.loaded(repoState)
+        val engine = if (result.review != null) "|${ChangesetsFragments.UPSOURCE.name}" else ""
         review.startLoad(
             repoState.takeIf { it.isKnown }?.branch.orEmpty(),
-            "${mode.name}|${result.targetRev}"
+            "${mode.name}|${result.targetRev}$engine"
         )
         diffSource.invalidate()
         lastActivatedPath = ""
@@ -952,6 +965,8 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
     private fun dropPendingScans() {
         statsScheduler.reset()
+        reviewStatsIndicator?.cancel()
+        reviewStatsIndicator = null
         diffSource.cancelPrefetch()
         todoScanId++
         fileChanges.reset()
@@ -988,6 +1003,46 @@ class HgChangesPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                 }
             } finally {
                 onEdt {
+                    if (statsScheduler.abandonLoad(load)) {
+                        review.learn(emptyMap())
+                        updateSummary(shownFiles())
+                    }
+                    if (statsScheduler.isCurrent(load)) flushPendingStatsKeys()
+                }
+            }
+        }
+    }
+
+    private fun loadReviewStats(engineReview: ChangesetsReview, load: StatsLoad, trace: LoadTrace?) {
+        updateSummary(shownFiles())
+        val indicator = EmptyProgressIndicator()
+        reviewStatsIndicator = indicator
+
+        ApplicationManager.getApplication().executeOnPooledThread {
+            var counted: Map<String, HgDiffStat?>? = null
+            try {
+                counted = trace.timed("review stats") {
+                    ProgressManager.getInstance().runProcess(Computable { engineReview.stats() }, indicator)
+                }
+            } catch (_: ProcessCanceledException) {
+            } finally {
+                val stats = counted
+                onEdt {
+                    if (stats != null && statsScheduler.finishLoad(load)) {
+                        trace.timed("apply stats") {
+                            val applied = ReviewStats.apply(sourceFiles, stats)
+                            sourceFiles.clear()
+                            sourceFiles.addAll(applied)
+                            review.learn(ReviewStats.hashes(stats))
+                            publishStatuses()
+                        }
+                        if (listMode == HgListMode.FILES) {
+                            renderFiltered(trace, reuseTree = true)
+                        } else {
+                            updateSummary(shownFiles())
+                        }
+                        report(trace)
+                    }
                     if (statsScheduler.abandonLoad(load)) {
                         review.learn(emptyMap())
                         updateSummary(shownFiles())

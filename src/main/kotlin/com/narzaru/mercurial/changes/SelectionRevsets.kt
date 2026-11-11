@@ -27,10 +27,20 @@ object SelectionRevsets {
     }
 
     fun base(revisions: List<HgRevision>, selection: RevisionSelection): String {
-        val oldest = revisions.filter { selection.isSelected(it) }
-            .minByOrNull { it.rev.toLongOrNull() ?: Long.MAX_VALUE }
+        val oldest = revisions.filter { selection.isSelected(it) }.minByOrNull { order(it) }
         return if (oldest == null) BranchRevisions.NO_REVISION else "p1(${oldest.node})"
     }
+
+    fun review(revisions: List<HgRevision>, selection: RevisionSelection): String? {
+        val wanted = revisions.filter { selection.isSelected(it) }
+        val first = wanted.minByOrNull { order(it) } ?: return null
+        val last = wanted.maxBy { order(it) }
+        val selected = selected(revisions, selection)
+        if (first == last) return selected
+        return "($selected) + ((${first.node}::${last.node}) and merge() and (${BranchRevisions.OWN_REVS}))"
+    }
+
+    private fun order(revision: HgRevision): Long = revision.rev.toLongOrNull() ?: Long.MAX_VALUE
 
     fun subset(universe: String, members: List<String>, wanted: Collection<String>): String {
         val wantedSet = wanted.toSet()

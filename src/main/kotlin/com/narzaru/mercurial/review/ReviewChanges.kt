@@ -74,7 +74,11 @@ class ReviewChanges(
 
     fun load(nodes: Collection<String>): ReviewLoad {
         if (nodes.isEmpty()) return ReviewLoad(emptyList(), emptyList())
-        val log = commands.run(ReviewLog.args(BranchRevisions.revset(nodes)))
+        return loadRevset(BranchRevisions.revset(nodes))
+    }
+
+    fun loadRevset(revset: String): ReviewLoad {
+        val log = commands.run(ReviewLog.args(revset))
         if (!log.success) return ReviewLoad(emptyList(), emptyList(), HgFailure.message(log))
         val revisions = ReviewLog.parse(log.stdout).sortedBy { it.rev }
         revisions.forEach { graph[it.node] = it }

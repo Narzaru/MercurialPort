@@ -10,7 +10,8 @@ data class ComparisonState(
     val baseRev: String = ".",
     val mode: HgDisplayMode = HgDisplayMode.UNCOMMITTED,
     val changesetRevs: Map<String, List<String>> = emptyMap(),
-    val itemsByPath: Map<String, HgFileItem> = emptyMap()
+    val itemsByPath: Map<String, HgFileItem> = emptyMap(),
+    val review: ChangesetsReview? = null
 ) {
 
     fun revsFor(path: String, basePath: String): List<String>? =

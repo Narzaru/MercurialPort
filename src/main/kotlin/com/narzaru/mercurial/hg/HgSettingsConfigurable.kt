@@ -109,7 +109,8 @@ class HgSettingsConfigurable : Configurable {
                 text(
                     "In the <b>Changesets</b> mode the left side of a diff is the head with the " +
                         "branch's own patches rolled back out of it, so that what a merge brought " +
-                        "into the file stays out of the diff."
+                        "into the file stays out of the diff. <b>Upsource review</b> below replaces " +
+                        "this with Upsource's own rules, the file list and the ± counts included."
                 )
             }
             row {

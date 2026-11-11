@@ -46,6 +46,31 @@ class HgSettingsTest {
     }
 
     @Test
+    fun `every fragment choice is read back under the name it is stored by`() {
+        for (choice in ChangesetsFragments.entries) {
+            assertEquals(choice, ChangesetsFragments.fromStored(choice.name))
+        }
+        assertEquals("UPSOURCE", ChangesetsFragments.UPSOURCE.name)
+    }
+
+    @Test
+    fun `a missing or unknown fragment choice falls back to the default`() {
+        assertEquals(ChangesetsFragments.PLATFORM_TRIMMED, ChangesetsFragments.DEFAULT)
+        assertEquals(ChangesetsFragments.DEFAULT, ChangesetsFragments.fromStored(null))
+        assertEquals(ChangesetsFragments.DEFAULT, ChangesetsFragments.fromStored("NO_SUCH_ENGINE"))
+    }
+
+    @Test
+    fun `the review engine runs only when chosen with whole fragments on`() {
+        assertTrue(HgSettings.reviewEngineChoice(true, ChangesetsFragments.UPSOURCE))
+        assertFalse(HgSettings.reviewEngineChoice(false, ChangesetsFragments.UPSOURCE))
+        for (choice in ChangesetsFragments.entries - ChangesetsFragments.UPSOURCE) {
+            assertFalse(HgSettings.reviewEngineChoice(true, choice))
+        }
+        assertFalse(HgSettings.usesReviewEngine)
+    }
+
+    @Test
     fun `a server count outside the offered bounds is pulled back into them`() {
         assertEquals(HgServerPool.MIN_SERVERS, HgSettings.boundCount(0))
         assertEquals(HgServerPool.MAX_SERVERS, HgSettings.boundCount(12))

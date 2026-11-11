@@ -16,7 +16,8 @@ class DiffSides(
 
 class DiffSidesReader(
     private val builder: BranchBaseBuilder,
-    private val skippedHunks: MutableMap<String, Int>
+    private val skippedHunks: MutableMap<String, Int>,
+    private val reviewLeftSide: ((HgFileItem) -> String?)? = null
 ) {
 
     fun read(item: HgFileItem, panelBaseRev: String): DiffSides {
@@ -27,6 +28,10 @@ class DiffSidesReader(
         }
         val head = builder.readRevision(plan.headRev, plan.headPath)
         if (!plan.needsBase) return sides(plan, item, base = null, head = head)
+        reviewLeftSide?.let { leftSide ->
+            val base = leftSide(item) ?: builder.readRevision(plan.baseRev, plan.basePath)
+            return sides(plan, item, base, head)
+        }
         branchBase(item, head)?.let { return sides(plan, item, it, head) }
         val lastChangeBase = builder.readRevision(plan.lastChangeBaseRev, plan.headPath)
         return sides(plan, item, lastChangeBase, head, onlyLast = true)

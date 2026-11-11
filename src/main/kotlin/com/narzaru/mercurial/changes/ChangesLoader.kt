@@ -7,6 +7,7 @@ import com.narzaru.mercurial.hg.HgStatusParser
 import com.narzaru.mercurial.model.HgDisplayMode
 import com.narzaru.mercurial.model.HgFileItem
 import com.narzaru.mercurial.model.HgFileStatus
+import com.narzaru.mercurial.review.ReviewChanges
 
 data class ChangesResult(
     val files: List<HgFileItem>,
@@ -26,7 +27,9 @@ data class ChangesResult(
 
     val currentInfo: String = "",
 
-    val revisionsMoreThan: Int? = null
+    val revisionsMoreThan: Int? = null,
+
+    val review: ChangesetsReview? = null
 ) {
 
     companion object {
@@ -46,7 +49,8 @@ class ChangesLoader(
     private val jobs: ParallelJobs,
     private val branchSize: BranchSizeGuard,
     private val revisionOverrides: (String) -> List<String>,
-    private val warn: (String) -> Unit
+    private val warn: (String) -> Unit,
+    private val reviewEngine: ReviewChanges? = null
 ) {
 
     fun load(
@@ -111,6 +115,10 @@ class ChangesLoader(
         }
 
         if (mode.isChangesets) {
+            reviewEngine?.let { engine ->
+                val revset = SelectionRevsets.review(revisions, selection) ?: BranchRevisions.revset(selectedNodes)
+                return engineChanges(engine, revset, targetRev, statusText, branch, revisions, selection, trace)
+            }
             return reviewChanges(selectedNodes, targetRev, statusText, branch, revisions, selection, trace)
         }
 
@@ -200,6 +208,24 @@ class ChangesLoader(
         return ChangesResult(
             files, targetRev, statusText, null, branch, revisions, selection,
             collected.ranges, revsByFile, statsPaths
+        )
+    }
+
+    private fun engineChanges(
+        engine: ReviewChanges,
+        revset: String,
+        targetRev: String,
+        statusText: String,
+        branch: String,
+        revisions: List<HgRevision>,
+        selection: RevisionSelection,
+        trace: LoadTrace?
+    ): ChangesResult {
+        val load = trace.timed("review files") { engine.loadRevset(revset) }
+        load.error?.let { return ChangesResult.failure(it, targetRev, branch, revisions, selection) }
+        val review = ChangesetsReview(engine, load)
+        return ChangesResult(
+            review.items, targetRev, statusText, null, branch, revisions, selection, review = review
         )
     }
 
