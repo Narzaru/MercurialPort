@@ -3,6 +3,9 @@
 # Mercurial Port Changelog
 
 ## [Unreleased]
+### Fixed
+- Switching from a file to its diff with `F4` could leave the file's text on screen over the diff,
+  with artifacts when scrolling.
 
 ## [1.2.0] - 2026-11-11
 ### Added

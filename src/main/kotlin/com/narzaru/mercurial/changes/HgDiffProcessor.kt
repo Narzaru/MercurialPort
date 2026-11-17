@@ -80,7 +80,6 @@ class HgDiffProcessor(project: Project, chain: DiffRequestChain) :
         if (viewer.request.getUserData(REQUESTED_CARET) == null) return
         viewer.addListener(object : DiffViewerListener() {
             override fun onAfterRediff() {
-                viewer.removeListener(this)
                 placeRequestedCaret(viewer)
             }
         })
